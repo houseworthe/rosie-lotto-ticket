@@ -6,6 +6,10 @@
 
 ---
 
+## Why This Matters
+
+Training a 7-billion parameter model costs millions in compute. We found that 3.5 billion of those parameters are dead weight — zeroed out with no impact on quality. The industry is spending half its GPU budget training neurons that do nothing. If we could find the winning ticket before training, the cost of AI drops in half overnight. That's not a hypothetical. That's what NVIDIA is building hardware for right now.
+
 ## The Question
 
 In 2018, MIT proved you can delete 90% of a neural network and it still works. They called it the **Lottery Ticket Hypothesis** — inside every large network, there's a small "winning ticket" subnetwork doing all the real work.
