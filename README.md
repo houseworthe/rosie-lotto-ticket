@@ -2,11 +2,6 @@
 
 **Competition:** ROSIE Supercomputer Super Challenge  
 **Deadline:** Friday, March 27, 2026 @ 11:59 PM  
-**Prize:** $10K / $6K / $4K + NVIDIA GPUs + DGX Spark  
-**Judges:** Dwight Diercks (NVIDIA SVP), Nick Haemel (NVIDIA VP), Dr. Kedziora, Dr. Riley  
-**Team:** Ethan Houseworth + Ultron  
-**Idea from:** Daniel  
-**Submit to:** Rosie_S.lqe6tdwasggor3ys@u.box.com (or riley@msoe.edu if file too large)
 
 ## Concept
 
