@@ -29,6 +29,12 @@ Strip unused tokens from embedding/unembedding layers. Most models ship with voc
 ### Track C: Surgical Inter-Size Pruning
 When a model family has size gaps (e.g. Qwen3-9B and Qwen3-27B), prune the larger model down to fill the gap (~15–20B). Use structured layer pruning (drop transformer blocks) and/or width pruning (reduce hidden dim). Find the sweet spot: significantly better than 9B quality at a fraction of 27B cost. Requires V100/H100 for the larger models.
 
+### Track E: Non-English Token Pruning → Benchmark Validation
+Strip non-English tokens (CJK, Arabic, Cyrillic, etc.) from the vocabulary for English-only tasks. Daniel's experiments show ~1GB VRAM savings, but the key question is: **does the model still perform identically on English benchmarks?** The model's internal representations might subtly depend on multilingual tokens. This track systematically measures the impact: prune increasing percentages of non-English vocab → eval on all target benchmarks → find the threshold where quality degrades (if it does).
+
+### Track F: Vision Encoder Removal from VL Models
+Qwen3-VL models have a vision encoder bolted onto the language backbone. Strip the vision components entirely and evaluate the remaining language model against the pure-language Qwen3 equivalent. Two interesting outcomes: (1) if it matches, you get a cheaper model from the VL weights, (2) if it's *better*, multimodal training improved language understanding — which is a publishable finding. Requires careful surgery to remove vision encoder + projection layers without breaking the language path.
+
 ### Track D: Combined Pipelines
 The real magic is combining techniques. The agent should try different orderings and measure quality-per-VRAM:
 - Vocab pruning → fine-tuning (baseline combo)
