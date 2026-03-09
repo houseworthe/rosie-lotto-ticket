@@ -1,149 +1,112 @@
-# Who Has the Best Lottery Ticket?
-### Comparing Neural Network Pruning Across Modern LLM Architectures on ROSIE
+# ROSIE Autoresearch — Small Model Fine-Tuning
 
-**ROSIE Supercomputer Super Challenge 2026**
-**Team:** Ethan Houseworth + Ultron
+**Goal:** Fine-tune small language models (Qwen3 0.6B–8B) on specific tasks to match or beat frontier LLMs (Opus, Sonnet, GPT-5), using Karpathy's autoresearch framework adapted for SLURM.
 
----
+**Inspired by:** [Distil Labs](https://www.distilai.com/) results showing fine-tuned small models can beat GPT-4 on narrow tasks, and [Karpathy's autoresearch](https://github.com/karpathy/autoresearch) for autonomous experimentation.
 
-## Why This Matters
+## Concept
 
-Training a 7-billion parameter model costs millions in compute. We found that 3.5 billion of those parameters are dead weight — zeroed out with no impact on quality. The industry is spending half its GPU budget training neurons that do nothing. If we could find the winning ticket before training, the cost of AI drops in half overnight. That's not a hypothetical. That's what NVIDIA is building hardware for right now.
+Instead of pretraining from scratch (original autoresearch), we **fine-tune** pretrained Qwen3 models on specific benchmarks. The autoresearch loop submits SLURM jobs to ROSIE, polls for completion, evaluates results, and iterates — all autonomously overnight.
 
-## The Question
+**The bet:** A 0.6B–4B model, fine-tuned with the right data/hyperparameters, can match frontier models on narrow tasks. The agent explores the hyperparameter space while you sleep.
 
-In 2018, MIT proved you can delete 90% of a neural network and it still works. They called it the **Lottery Ticket Hypothesis** — inside every large network, there's a small "winning ticket" subnetwork doing all the real work.
+## Target Tasks
 
-But that was 2018. Models were small. Architectures were simple.
+| Task | Dataset | Metric | Frontier Baseline |
+|------|---------|--------|-------------------|
+| **TREC Classification** | TREC-50 (question type classification) | Accuracy | ~97% (GPT-4) |
+| **Text2SQL** | Spider / WikiSQL | Execution accuracy | ~85% (GPT-4) |
+| **E-commerce Classification** | Amazon product categorization | F1 score | ~95% (GPT-4) |
 
-**We wanted to know: does this still hold for modern LLMs? And where exactly does the lottery ticket live?**
+These were chosen because:
+1. Well-defined, measurable outputs
+2. Existing datasets with clear eval metrics
+3. Distil Labs showed small models can win on similar tasks
+4. Feasible to fine-tune on T4/V100 GPUs within SLURM time limits
 
-## What We Did
+## Architecture
 
-### Phase 1: The Cliff
-We took Mistral 7B and pruned it uniformly at 50%, 70%, and 90% sparsity. Found the cliff — 50% pruning barely hurts, 70% destroys it.
-
-### Phase 2: Where Does the Lottery Ticket Live?
-Instead of pruning everything uniformly, we targeted specific layer types to find out which parts of the network matter most. ~20 experiments on Mistral 7B:
-
-**Targets × Sparsity Levels:**
-
-| Target | What it is | 30% | 50% | 70% |
-|--------|-----------|-----|-----|-----|
-| **All layers** | Uniform pruning (baseline comparison) | TBD | TBD | TBD |
-| **Attention** | q/k/v/o projections — how the model "looks at" context | TBD | TBD | TBD |
-| **MLP** | Feed-forward layers — where the model "thinks" | TBD | TBD | TBD |
-| **Early layers** (0-15) | First half of the network — initial processing | TBD | TBD | TBD |
-| **Late layers** (16-31) | Second half — final reasoning and output | TBD | TBD | TBD |
-| **Embeddings** | Input/output token representations | TBD | — | — |
-| **LM head** | Final output layer | TBD | — | — |
-
-**Plus extreme tests:**
-
-| Target | 90% Sparsity |
-|--------|-------------|
-| Attention only | TBD |
-| MLP only | TBD |
-
-**Total: ~20 experiments**
-
-This tells us: Is the lottery ticket in the attention mechanism? The feed-forward layers? The early processing or late reasoning? Which component can you gut and which is sacred?
-
-### Phase 3: Cross-Model Comparison (if time permits)
-Run the same experiments on multiple architectures to see if the lottery ticket location is universal or architecture-dependent:
-
-| Model | Parameters | Developer |
-|-------|-----------|-----------|
-| Mistral 7B | 7.24B | Mistral AI |
-| Qwen2.5 7B | 7.6B | Alibaba |
-| SmolLM2 1.7B | 1.7B | HuggingFace |
-| Phi-2 | 2.7B | Microsoft |
-| Qwen2.5 0.5B | 0.5B | Alibaba |
-
-## Benchmarks
-
-| Metric | What it measures | Tool |
-|--------|-----------------|------|
-| **Perplexity** | Model accuracy/intelligence (lower = better) | WikiText-2 dataset |
-| **Inference speed** | Tokens per second | 50-token generation benchmark |
-| **Memory usage** | GPU VRAM consumption | torch.cuda.memory_allocated |
-| **Output quality** | Can it still write coherent English? | Manual inspection |
-
-All experiments run on V100 (32GB) for fair comparison.
-
-## Results
-
-### Phase 1: Uniform Pruning (Mistral 7B, V100)
-
-| Sparsity | Perplexity | Tokens/sec | Coherent? |
-|----------|-----------|------------|-----------|
-| Baseline | 4.0 | 3.19* | ✅ |
-| 50% | 6.46 | 16.96 | ✅ |
-| 70% | 1,239.63 | 21.56 | ❌ |
-| 90% | 35,789.36 | 21.61 | ❌ |
-
-*Baseline ran on T4 with CPU offloading; needs V100 re-run for fair speed comparison.
-
-**The cliff is between 50-70%.** Delete half, barely any damage. Delete 70%, total collapse.
-
-**Sample outputs:**
-- **Baseline:** "The meaning of life is to find your gift. The purpose of life is to give it away."
-- **50% pruned:** "The meaning of life is to be found in the life we lead, not in the life we wish we had."
-- **70% pruned:** "The meaning of life is a life fulled life fulled life fulled life fulled..."
-- **90% pruned:** "The meaning of life is­rezentaturagem kennis kennis opponaturajuajuajuaju..."
-
-### Phase 2: Layer-Targeted Pruning
-
-*Results pending — experiments ready to run*
-
-### Phase 3: Cross-Model
-
-*Results pending*
-
-## Method
-
-**Pruning technique:** Unstructured L1 magnitude pruning (`torch.nn.utils.prune`). Rank every weight by absolute value, zero out the smallest X%. Architecture stays the same shape — same layers, same neurons — but connections are dead.
-
-**Why magnitude pruning?** It's the method from the original Lottery Ticket paper. Simple, reproducible, and the baseline against which all other pruning methods are compared.
-
-**Precision:** float16 (Daniel's recommendation: explore float8 as additional axis — can you prune AND quantize?)
-
-**Benchmark:** WikiText-2 test set, 2048 token context window. Perplexity measured via cross-entropy loss. Speed measured on 50-token generation.
-
-## Infrastructure
-
-- **Cluster:** MSOE ROSIE Supercomputer
-- **GPUs:** NVIDIA V100 (32GB) on DGX partition
-- **Software:** PyTorch, HuggingFace Transformers
-- **Environment:** `/data/csc4611/conda-csc4611/`
-
-## References
-
-- Frankle, J. & Carbin, M. (2018). "The Lottery Ticket Hypothesis: Finding Sparse, Trainable Neural Networks." arXiv:1803.03635
-- Mistral AI, Alibaba (Qwen), Microsoft (Phi), HuggingFace (SmolLM)
-
-## Reproducibility
-
-All code is in this repo. To reproduce:
-
-```bash
-# On ROSIE, request a V100
-srun --partition=dgx --gpus=1 --cpus-per-gpu=8 -t 0-4:0 --pty bash
-conda activate /data/csc4611/conda-csc4611/
-
-# Phase 1: Uniform pruning
-python3 prune.py
-
-# Phase 2: Layer-targeted pruning
-python3 prune_layers.py
-
-# Phase 3: Multi-model comparison
-python3 prune_multi.py
+```
+┌─────────────────────────────────────┐
+│  Agent (autoresearch loop)          │
+│  - Reads program.md                 │
+│  - Modifies finetune.py             │
+│  - Submits SLURM jobs via SSH       │
+│  - Polls for job completion         │
+│  - Reads eval metrics from output   │
+│  - Keeps/discards, iterates         │
+└──────────┬──────────────────────────┘
+           │ sbatch / squeue / cat slurm-*.out
+           ▼
+┌─────────────────────────────────────┐
+│  ROSIE (SLURM cluster)             │
+│  - teaching: T4 (16GB)             │
+│  - dgx: V100 (32GB)               │
+│  - dgxh100: H100 (80GB)           │
+│                                     │
+│  Each job:                          │
+│  1. Loads Qwen3 model              │
+│  2. Fine-tunes on task dataset     │
+│  3. Evaluates on held-out test set │
+│  4. Prints metrics to stdout       │
+└─────────────────────────────────────┘
 ```
 
-## Open Questions
+## Project Structure
 
-1. **Where does the lottery ticket live?** Attention vs MLP vs early vs late layers
-2. **Can you prune AND quantize?** float16 vs float8 pruning comparison
-3. **Do bigger models have better lottery tickets?** More redundancy = more prunable?
-4. **Is the lottery ticket location universal?** Same across architectures or different?
+```
+README.md           — this file
+program.md          — autoresearch agent instructions (adapted for SLURM)
+finetune.py         — the file the agent modifies (model, LoRA config, hyperparams)
+prepare.py          — one-time dataset download and preprocessing
+slurm_template.sh   — SBATCH job template
+eval.py             — evaluation harness (fixed, agent cannot modify)
+requirements.txt    — pip dependencies for ROSIE conda env
+results.tsv         — experiment log (untracked)
+```
+
+## Quick Start
+
+```bash
+# 1. SSH into ROSIE
+ssh houseworthe@dh-mgmt2.hpc.msoe.edu
+
+# 2. Clone this repo
+git clone https://github.com/houseworthe/rosie-lotto-ticket.git ~/autoresearch
+cd ~/autoresearch
+
+# 3. Set up conda environment
+conda create -n autoresearch python=3.11 -y
+conda activate autoresearch
+pip install -r requirements.txt
+
+# 4. Download datasets (run on management node, no GPU needed)
+python prepare.py
+
+# 5. Test a single fine-tuning run
+sbatch slurm_template.sh
+
+# 6. Once working, point your agent at program.md and let it go
+```
+
+## Models
+
+| Model | Parameters | VRAM (bf16) | Fits on |
+|-------|-----------|-------------|---------|
+| Qwen3-0.6B | 0.6B | ~1.5GB | T4 ✅ |
+| Qwen3-1.7B | 1.7B | ~4GB | T4 ✅ |
+| Qwen3-4B | 4B | ~9GB | T4 ✅, V100 ✅ |
+| Qwen3-8B | 8B | ~17GB | V100 ✅, H100 ✅ |
+
+We use LoRA (Low-Rank Adaptation) to make fine-tuning feasible on smaller GPUs. Full fine-tuning is an option the agent can explore on V100/H100.
+
+## Previous Work (Lottery Ticket)
+
+This project was originally a Lottery Ticket Hypothesis experiment on Mistral 7B for the ROSIE Super Challenge 2026. Key finding: 50% magnitude pruning preserves coherence (perplexity 4.0→6.46) with 5x speedup, but 70%+ causes collapse. That work is preserved in git history.
+
+## Links
+
+- [Karpathy's autoresearch](https://github.com/karpathy/autoresearch)
+- [Distil Labs](https://www.distilai.com/)
+- [Qwen3 Models](https://huggingface.co/Qwen)
+- [ROSIE User Guide](https://msoe.dev/)

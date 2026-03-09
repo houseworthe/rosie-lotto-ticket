@@ -1,0 +1,16 @@
+# Core ML
+torch>=2.1.0
+transformers>=4.40.0
+datasets>=2.18.0
+accelerate>=0.28.0
+peft>=0.10.0
+
+# Evaluation
+scikit-learn>=1.4.0
+numpy>=1.24.0
+
+# Quantization (optional, for QLoRA)
+bitsandbytes>=0.43.0
+
+# Data
+pyarrow>=15.0.0
