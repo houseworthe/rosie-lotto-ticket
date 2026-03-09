@@ -18,6 +18,26 @@ Instead of pretraining from scratch (original autoresearch), we **fine-tune** pr
 | **Text2SQL** | Spider / WikiSQL | Execution accuracy | ~85% (GPT-4) |
 | **E-commerce Classification** | Amazon product categorization | F1 score | ~95% (GPT-4) |
 
+## Experiment Tracks
+
+### Track A: Fine-Tuning (beat frontier on narrow tasks)
+LoRA/QLoRA fine-tuning of Qwen3 0.6B–8B on specific benchmarks (TREC, Text2SQL, E-commerce). See target tasks above.
+
+### Track B: Vocabulary Pruning (free VRAM savings)
+Strip unused tokens from embedding/unembedding layers. Most models ship with vocabularies containing thousands of tokens never used in the target task (CJK characters, code tokens, etc.). Removing them saves ~1GB+ VRAM with **zero quality loss** — it's mathematically lossless for the task. Daniel already validated this on Qwen3 on his own hardware. This should be the **default first step** before any other optimization.
+
+### Track C: Surgical Inter-Size Pruning
+When a model family has size gaps (e.g. Qwen3-9B and Qwen3-27B), prune the larger model down to fill the gap (~15–20B). Use structured layer pruning (drop transformer blocks) and/or width pruning (reduce hidden dim). Find the sweet spot: significantly better than 9B quality at a fraction of 27B cost. Requires V100/H100 for the larger models.
+
+### Track D: Combined Pipelines
+The real magic is combining techniques. The agent should try different orderings and measure quality-per-VRAM:
+- Vocab pruning → fine-tuning (baseline combo)
+- Vocab pruning → layer pruning → fine-tuning
+- Layer pruning → fine-tuning → vocab pruning
+- Full pipeline: vocab prune → structured prune → LoRA fine-tune → quantize
+
+Each experiment is a **5–10 minute SLURM job** so we can run hundreds per night (~6–12/hour × 8 hours = 50–100 experiments).
+
 These were chosen because:
 1. Well-defined, measurable outputs
 2. Existing datasets with clear eval metrics
@@ -57,7 +77,10 @@ These were chosen because:
 ```
 README.md           — this file
 program.md          — autoresearch agent instructions (adapted for SLURM)
-finetune.py         — the file the agent modifies (model, LoRA config, hyperparams)
+finetune.py         — fine-tuning pipeline (agent-editable)
+vocab_prune.py      — vocabulary pruning (agent-editable)
+layer_prune.py      — structured layer/width pruning (agent-editable)
+pipeline.py         — combined pipeline orchestrator (agent-editable)
 prepare.py          — one-time dataset download and preprocessing
 slurm_template.sh   — SBATCH job template
 eval.py             — evaluation harness (fixed, agent cannot modify)

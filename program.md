@@ -22,21 +22,40 @@ To set up a new experiment, work with the user to:
 
 - **SLURM, not local GPU**: You submit jobs via `sbatch`, not `uv run train.py`
 - **Async execution**: After submitting, poll with `squeue -u houseworthe` until done, then read `slurm-<jobid>.out`
-- **Fine-tuning, not pretraining**: We load pretrained Qwen3 models and adapt with LoRA
+- **Multiple tracks**: Fine-tuning, vocab pruning, layer pruning, and combined pipelines
 - **Multiple tasks**: Each experiment targets a specific task (TREC, Text2SQL, E-commerce)
-- **Fixed time budget**: 30 minutes per SLURM job (not 5 min like original)
+- **Fixed time budget**: 5–10 minutes per SLURM job so you can run hundreds overnight
+
+## Experiment Tracks
+
+You have FOUR tracks to explore. Mix and match across them:
+
+### Track A: Fine-Tuning (`finetune.py`)
+LoRA/QLoRA fine-tuning of Qwen3 0.6B–8B on task benchmarks. Edit hyperparams, LoRA config, model size, prompt templates.
+
+### Track B: Vocabulary Pruning (`vocab_prune.py`)
+Strip unused tokens from embedding/unembedding layers. **Lossless** — zero quality impact, free VRAM savings. This should be the **default first step** before any other optimization. Experiment with pruning strategies (task-frequency, charset, hybrid).
+
+### Track C: Surgical Layer Pruning (`layer_prune.py`)
+Drop transformer layers from larger models to fill size gaps in the model family. E.g. prune Qwen3-27B → ~15-20B. Try different strategies: uniform, importance-based, middle-out. Use V100/H100 for larger models.
+
+### Track D: Combined Pipelines (`pipeline.py`)
+Run multiple techniques in sequence. The real value is finding the best ordering:
+- Vocab prune → fine-tune (baseline combo)
+- Vocab prune → layer prune → fine-tune
+- Layer prune → fine-tune → vocab prune
+- Full pipeline: vocab prune → layer prune → LoRA → quantize
+
+**Priority**: Start with Track B (vocab pruning — quick wins, validates the setup), then Track A (fine-tuning baselines), then Track D (combinations), then Track C (needs larger GPUs).
 
 ## What You CAN Do
 
-- Modify `finetune.py` — this is your main file. Everything is fair game:
-  - LoRA rank, alpha, target modules
-  - Learning rate, batch size, warmup steps
-  - Base model selection (Qwen3-0.6B through 8B)
-  - Training data sampling/augmentation strategy
-  - Prompt format and template
-  - Number of epochs
-- Modify `slurm_template.sh` — adjust partition, GPU count, time limit
-- Switch between tasks by changing the `TASK` variable in finetune.py
+- Modify `finetune.py` — LoRA config, hyperparams, model selection, prompt templates
+- Modify `vocab_prune.py` — pruning strategy, charset rules, frequency thresholds
+- Modify `layer_prune.py` — drop strategy, fraction, width pruning
+- Modify `pipeline.py` — pipeline ordering, step combinations
+- Modify `slurm_template.sh` — partition, GPU count, time limit, which script to run
+- Switch between tasks by changing the `TASK` variable in any script
 
 ## What You CANNOT Do
 
@@ -46,7 +65,7 @@ To set up a new experiment, work with the user to:
 
 ## The Goal
 
-For each task, get the **highest eval metric** (accuracy for TREC, execution accuracy for Text2SQL, F1 for E-commerce). The target is to match or exceed frontier LLM baselines.
+Maximize **quality per VRAM** — the best eval metric at the lowest memory footprint. For each task, match or exceed frontier LLM baselines while minimizing model size. Track all results across all four tracks.
 
 ## Experimentation
 
@@ -55,59 +74,58 @@ Each experiment is a SLURM job that takes ~30 minutes. The workflow:
 ### Submitting a Job
 
 ```bash
-# 1. Edit finetune.py with your experimental changes
+# 1. Edit the target script (finetune.py, vocab_prune.py, layer_prune.py, or pipeline.py)
 # 2. Commit the change
-git add finetune.py && git commit -m "experiment: <description>"
+git add -A && git commit -m "experiment: <description>"
 
-# 3. Submit to SLURM
-sbatch slurm_template.sh
-# Submitted batch job 12345
+# 3. Submit to SLURM (set SCRIPT env var for non-default scripts)
+sbatch slurm_template.sh                          # runs finetune.py (default)
+sbatch --export=SCRIPT=vocab_prune.py slurm_template.sh   # runs vocab_prune.py
+sbatch --export=SCRIPT=layer_prune.py slurm_template.sh   # runs layer_prune.py
+sbatch --export=SCRIPT=pipeline.py slurm_template.sh      # runs pipeline.py
 
-# 4. Poll for completion (check every 2-3 minutes)
+# 4. Poll for completion (check every 1-2 minutes — jobs are 5-10 min)
 squeue -u houseworthe
 # When the job disappears from the queue, it's done
 
 # 5. Read results
-cat slurm-12345.out | grep "^eval_"
+grep "^track:\|^eval_\|^task:\|^model:\|^param_reduction:\|^mb_saved:\|^peak_vram" slurm-<jobid>.out
 ```
 
 ### Output Format
 
-The finetune script prints a summary like:
+All scripts print a `---` delimited summary block. Key fields:
 
 ```
 ---
+track:            <finetune|vocab_prune|layer_prune|pipeline>
 task:             trec
 model:            Qwen/Qwen3-0.6B
 eval_accuracy:    0.9420
-eval_f1:          0.9380
-training_seconds: 1200.5
-total_seconds:    1350.2
-peak_vram_mb:     12500.0
-lora_rank:        16
-lora_alpha:       32
-learning_rate:    2e-4
-num_epochs:       3
-num_train_samples: 5452
+param_reduction:  35.2%
+peak_vram_mb:     8500.0
+total_seconds:    420.1
 ```
 
-Extract the key metric: `grep "^eval_" slurm-<jobid>.out`
+Extract metrics: `grep "^track:\|^eval_\|^param_\|^peak_vram\|^mb_saved" slurm-<jobid>.out`
 
 ## Logging Results
 
 Log to `results.tsv` (tab-separated):
 
 ```
-commit	task	model	eval_metric	metric_value	status	description
+commit	track	task	model	eval_metric	metric_value	peak_vram_mb	status	description
 ```
 
 Example:
 ```
-commit	task	model	eval_metric	metric_value	status	description
-a1b2c3d	trec	Qwen3-0.6B	accuracy	0.9420	keep	baseline LoRA r=16
-b2c3d4e	trec	Qwen3-0.6B	accuracy	0.9580	keep	increase LoRA r=64
-c3d4e5f	trec	Qwen3-1.7B	accuracy	0.9650	keep	upgrade to 1.7B model
-d4e5f6g	text2sql	Qwen3-4B	exec_accuracy	0.0000	crash	OOM on T4
+commit	track	task	model	eval_metric	metric_value	peak_vram_mb	status	description
+a1b2c3d	vocab_prune	trec	Qwen3-0.6B	accuracy	0.9400	800.0	keep	baseline vocab prune (task_frequency)
+b2c3d4e	finetune	trec	Qwen3-0.6B	accuracy	0.9420	4500.0	keep	baseline LoRA r=16
+c3d4e5f	pipeline	trec	Qwen3-0.6B	accuracy	0.9580	4200.0	keep	vocab_prune -> finetune
+d4e5f6g	layer_prune	trec	Qwen3-4B	accuracy	0.8900	6000.0	keep	drop 25% layers (importance)
+e5f6g7h	pipeline	trec	Qwen3-4B	accuracy	0.9650	5500.0	keep	vocab + layer prune + finetune
+f6g7h8i	finetune	text2sql	Qwen3-8B	exec_accuracy	0.0000	0.0	crash	OOM on T4
 ```
 
 ## The Experiment Loop
@@ -127,28 +145,34 @@ LOOP FOREVER:
 
 ### Experiment Ideas (in rough priority order)
 
-**Phase 1: Establish baselines**
-- Run each task with Qwen3-0.6B, default LoRA (r=16), default hyperparams
+**Phase 1: Quick wins — Vocab Pruning (Track B)**
+- Vocab prune Qwen3-0.6B for TREC → measure VRAM savings, confirm zero quality loss
+- Try all three strategies: task_frequency, charset, hybrid
+- Vocab prune Qwen3-1.7B, 4B → bigger models = bigger absolute savings
+- This validates the setup fast (runs in <2 min)
+
+**Phase 2: Fine-tuning baselines (Track A)**
+- Run each task with Qwen3-0.6B, default LoRA (r=16)
 - Run with Qwen3-1.7B for comparison
+- LoRA rank sweep: 8, 16, 32, 64
+- Learning rate sweep: 1e-5, 5e-5, 1e-4, 2e-4, 5e-4
 
-**Phase 2: Hyperparameter search**
-- LoRA rank: try 8, 16, 32, 64, 128
-- Learning rate: try 1e-5, 5e-5, 1e-4, 2e-4, 5e-4
-- Batch size vs gradient accumulation tradeoffs
-- Number of epochs: 1, 3, 5, 10
+**Phase 3: Combined pipelines (Track D)**
+- Vocab prune → LoRA fine-tune (the obvious combo)
+- Compare ordering: fine-tune first vs prune first
+- Vocab prune → layer prune → fine-tune
+- Full pipeline with quantization
 
-**Phase 3: Advanced techniques**
-- Full fine-tuning (on V100/H100 for smaller models)
-- QLoRA (4-bit quantization + LoRA)
-- Different target modules (q_proj, k_proj, v_proj, o_proj, gate_proj, etc.)
-- Prompt engineering: different instruction formats
-- Data augmentation: paraphrasing, few-shot examples in training data
+**Phase 4: Surgical pruning (Track C)**
+- Layer prune Qwen3-4B by 25% → eval quality retention
+- Try all strategies: uniform, last, middle, importance
+- If V100 available: prune Qwen3-27B → ~15-20B, compare vs Qwen3-9B
 
-**Phase 4: Push boundaries**
-- Qwen3-4B and 8B models
-- Ensemble approaches
-- Task-specific architectural tweaks
-- Curriculum learning (easy → hard examples)
+**Phase 5: Push boundaries**
+- QLoRA (4-bit + LoRA) for 8B models on T4
+- Full fine-tuning (V100/H100 for smaller models)
+- Data augmentation, prompt engineering
+- Best pipeline per task: find the optimal combo for TREC, Text2SQL, E-commerce
 
 ## SLURM Tips
 
