@@ -14,7 +14,7 @@ Instead of pretraining from scratch (original autoresearch), we **fine-tune** pr
 
 | Task | Dataset | Metric | Frontier Baseline |
 |------|---------|--------|-------------------|
-| **TREC Classification** | TREC-50 (question type classification) | Accuracy | ~97% (GPT-4) |
+| **TREC Classification** | TREC-6 (question type, 6 coarse classes) | Accuracy | ~97% (GPT-4 zero-shot) |
 | **Text2SQL** | Spider / WikiSQL | Execution accuracy | ~85% (GPT-4) |
 | **E-commerce Classification** | Amazon product categorization | F1 score | ~95% (GPT-4) |
 
