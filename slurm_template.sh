@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=autoresearch
 #SBATCH --partition=teaching
-#SBATCH --gpus=1
+#SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=8
 #SBATCH --time=00:15:00
 #SBATCH --output=slurm-%j.out
@@ -20,6 +20,10 @@
 # Default script if not specified
 SCRIPT=${SCRIPT:-finetune.py}
 
+# Load required modules
+module load conda
+module load cuda
+
 echo "=========================================="
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURM_NODELIST"
@@ -28,21 +32,30 @@ echo "GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || ec
 echo "Started: $(date)"
 echo "=========================================="
 
-bash --login -c "
-    conda activate autoresearch 2>/dev/null || conda activate /data/csc4611/conda-csc4611/
+echo ""
+echo "--- nvidia-smi (start of job) ---"
+nvidia-smi
+echo "---"
+echo ""
 
-    echo 'Python: '\$(python --version)
-    echo 'PyTorch: '\$(python -c 'import torch; print(torch.__version__)')
-    nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
-    echo ''
+# Activate conda environment
+conda activate autoresearch
 
-    export HF_HOME=~/autoresearch/.hf_cache
-    export TRANSFORMERS_CACHE=~/autoresearch/.hf_cache
+echo "Python: $(python --version)"
+echo "PyTorch: $(python -c 'import torch; print(torch.__version__)')"
+nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+echo ""
 
-    cd ~/autoresearch
-    python $SCRIPT
-"
+export HF_HOME=~/autoresearch/.hf_cache
+export TRANSFORMERS_CACHE=~/autoresearch/.hf_cache
 
+cd ~/autoresearch
+python $SCRIPT
+
+echo ""
+echo "--- nvidia-smi (end of job) ---"
+nvidia-smi
+echo "---"
 echo ""
 echo "=========================================="
 echo "Finished: $(date)"
