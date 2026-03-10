@@ -345,7 +345,7 @@ def main():
         save_total_limit=1,
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
-        fp16=use_fp16,
+        fp16=False,  # Disabled — cuBLAS INVALID_VALUE on T4 with fp16 mixed precision
         bf16=use_bf16,
         dataloader_num_workers=4,
         seed=SEED,
