@@ -40,6 +40,10 @@ def generate_predictions(model, tokenizer, prompts, max_new_tokens=128, batch_si
     model.eval()
     predictions = []
 
+    # Left-pad for batch generation with causal LMs (critical for correct results)
+    original_padding_side = tokenizer.padding_side
+    tokenizer.padding_side = "left"
+
     for i in range(0, len(prompts), batch_size):
         batch_prompts = prompts[i:i + batch_size]
         inputs = tokenizer(
@@ -64,6 +68,9 @@ def generate_predictions(model, tokenizer, prompts, max_new_tokens=128, batch_si
             prompt_len = inputs["input_ids"][j].shape[0]
             generated = tokenizer.decode(output[prompt_len:], skip_special_tokens=True).strip()
             predictions.append(generated)
+
+    # Restore original padding side
+    tokenizer.padding_side = original_padding_side
 
     return predictions
 
