@@ -272,7 +272,7 @@ def main():
     print(f"Loading model: {MODEL_NAME}")
     model_kwargs = {
         "trust_remote_code": True,
-        "torch_dtype": torch_dtype,
+        "torch_dtype": torch.float32,  # Load in fp32, let Trainer handle mixed precision
         "device_map": "auto",
     }
 
