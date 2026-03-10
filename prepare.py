@@ -39,7 +39,7 @@ def prepare_trec():
     os.makedirs(task_dir, exist_ok=True)
 
     # Load TREC-6 (coarse-grained labels)
-    dataset = load_dataset("CogComp/trec", trust_remote_code=True)
+    dataset = load_dataset("trec")
 
     def add_label_text(example):
         example["label_text"] = TREC_COARSE_LABELS.get(
