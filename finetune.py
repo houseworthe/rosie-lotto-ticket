@@ -274,6 +274,7 @@ def main():
         "trust_remote_code": True,
         "torch_dtype": torch.float32,  # Load in fp32, let Trainer handle mixed precision
         "device_map": "auto",
+        "attn_implementation": "eager",  # SDPA causes cuBLAS INVALID_VALUE on T4
     }
 
     if USE_4BIT:
