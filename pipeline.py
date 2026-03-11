@@ -214,7 +214,11 @@ def step_quantize(model, tokenizer, state):
 
 
 class RemappedTokenizerWrapper:
-    """Wraps a tokenizer to remap token IDs after vocabulary pruning."""
+    """Wraps a tokenizer to remap token IDs after vocabulary pruning.
+
+    Handles padding correctly so that batched sequences always produce
+    consistently-shaped tensors (required by HuggingFace Trainer / DataCollator).
+    """
 
     def __init__(self, tokenizer, id_map):
         self._tokenizer = tokenizer
@@ -225,27 +229,110 @@ class RemappedTokenizerWrapper:
         self.eos_token_id = id_map.get(tokenizer.eos_token_id, 0)
         self.bos_token_id = id_map.get(tokenizer.bos_token_id, 0) if tokenizer.bos_token_id is not None else None
         self.vocab_size = len(id_map)
+        # Expose padding_side so DataCollator can read/set it
+        self.padding_side = getattr(tokenizer, "padding_side", "right")
+        self.model_input_names = getattr(tokenizer, "model_input_names", ["input_ids", "attention_mask"])
+
+    def _remap_ids(self, ids_batch):
+        """Remap a batch (list of lists) of old token IDs to new IDs."""
+        remapped = []
+        for ids in ids_batch:
+            if hasattr(ids, 'tolist'):
+                ids = ids.tolist()
+            remapped.append([self._id_map.get(tid, 0) for tid in ids])
+        return remapped
 
     def __call__(self, *args, **kwargs):
         result = self._tokenizer(*args, **kwargs)
-        # Remap input_ids
         import torch as _torch
+
         input_ids = result["input_ids"]
         is_tensor = isinstance(input_ids, _torch.Tensor)
-        remapped = []
-        for ids in input_ids:
-            if hasattr(ids, 'tolist'):
-                ids_list = ids.tolist()
+
+        # Handle single-example case (list of ints, not list of lists)
+        if input_ids and not isinstance(input_ids[0], (list, _torch.Tensor)):
+            # Single sequence
+            remapped = [self._id_map.get(tid, 0) for tid in
+                        (input_ids.tolist() if hasattr(input_ids, 'tolist') else input_ids)]
+            if is_tensor:
+                result["input_ids"] = _torch.tensor(remapped, device=input_ids.device)
             else:
-                ids_list = list(ids)
-            remapped.append([self._id_map.get(tid, 0) for tid in ids_list])
-        # Return same format: tensor if input was tensor (same-length rows),
-        # otherwise list of lists (datasets .map() expects plain lists)
+                result["input_ids"] = remapped
+            return result
+
+        remapped = self._remap_ids(input_ids)
+
         if is_tensor:
+            # Underlying tokenizer already padded to same length; safe to convert
             result["input_ids"] = _torch.tensor(remapped, device=input_ids.device)
         else:
             result["input_ids"] = remapped
         return result
+
+    def pad(self, encoded_inputs, **kwargs):
+        """Pad a batch of encoded inputs using the REMAPPED pad_token_id.
+
+        This is called by DataCollatorForSeq2Seq and must produce
+        consistently-shaped tensors.
+        """
+        import torch as _torch
+
+        # Reverse-map all input_ids back to original space so the underlying
+        # tokenizer's pad() can work, then re-remap after padding.
+        restored = []
+        for enc in encoded_inputs:
+            entry = dict(enc)
+            ids = entry["input_ids"]
+            if hasattr(ids, 'tolist'):
+                ids = ids.tolist()
+            entry["input_ids"] = [self._reverse_map.get(tid, tid) for tid in ids]
+            # Reverse-map labels too if present (labels use old IDs after remapping)
+            if "labels" in entry:
+                labs = entry["labels"]
+                if hasattr(labs, 'tolist'):
+                    labs = labs.tolist()
+                entry["labels"] = [self._reverse_map.get(tid, tid) if tid != -100 else -100 for tid in labs]
+            restored.append(entry)
+
+        # Let the real tokenizer handle padding (it knows max_length, padding_side, etc.)
+        padded = self._tokenizer.pad(restored, **kwargs)
+
+        # Re-remap input_ids to pruned space
+        input_ids = padded["input_ids"]
+        is_tensor = isinstance(input_ids, _torch.Tensor)
+        if is_tensor:
+            ids_list = input_ids.tolist()
+        else:
+            ids_list = input_ids
+
+        remapped = []
+        for ids in ids_list:
+            remapped.append([self._id_map.get(tid, 0) for tid in ids])
+
+        if is_tensor:
+            padded["input_ids"] = _torch.tensor(remapped, dtype=input_ids.dtype, device=input_ids.device)
+        else:
+            padded["input_ids"] = remapped
+
+        # Re-remap labels if present
+        if "labels" in padded:
+            labels = padded["labels"]
+            is_tensor_lab = isinstance(labels, _torch.Tensor)
+            if is_tensor_lab:
+                lab_list = labels.tolist()
+            else:
+                lab_list = labels
+
+            remapped_labs = []
+            for labs in lab_list:
+                remapped_labs.append([self._id_map.get(tid, -100) if tid != -100 else -100 for tid in labs])
+
+            if is_tensor_lab:
+                padded["labels"] = _torch.tensor(remapped_labs, dtype=labels.dtype, device=labels.device)
+            else:
+                padded["labels"] = remapped_labs
+
+        return padded
 
     def decode(self, ids, **kwargs):
         if hasattr(ids, 'tolist'):

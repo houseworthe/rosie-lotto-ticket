@@ -26,6 +26,28 @@ TREC_COARSE_LABELS = {
     5: "NUMERIC",
 }
 
+# TREC-50 fine-grained label mapping (coarse:fine)
+TREC_FINE_LABELS = {
+    0: "abbreviation:abbreviation", 1: "abbreviation:expansion",
+    2: "entity:animal", 3: "entity:body", 4: "entity:color",
+    5: "entity:creation", 6: "entity:currency", 7: "entity:disease",
+    8: "entity:event", 9: "entity:food", 10: "entity:instrument",
+    11: "entity:language", 12: "entity:letter", 13: "entity:other",
+    14: "entity:plant", 15: "entity:product", 16: "entity:religion",
+    17: "entity:sport", 18: "entity:substance", 19: "entity:symbol",
+    20: "entity:technique", 21: "entity:term", 22: "entity:vehicle",
+    23: "entity:word", 24: "description:definition",
+    25: "description:description", 26: "description:manner",
+    27: "description:reason", 28: "human:group", 29: "human:individual",
+    30: "human:title", 31: "human:description", 32: "location:city",
+    33: "location:country", 34: "location:mountain", 35: "location:other",
+    36: "location:state", 37: "numeric:code", 38: "numeric:count",
+    39: "numeric:date", 40: "numeric:distance", 41: "numeric:money",
+    42: "numeric:order", 43: "numeric:other", 44: "numeric:percent",
+    45: "numeric:period", 46: "numeric:speed", 47: "numeric:temperature",
+    48: "numeric:size", 49: "numeric:weight",
+}
+
 # ---------------------------------------------------------------------------
 # Task preparation functions
 # ---------------------------------------------------------------------------
@@ -55,6 +77,34 @@ def prepare_trec():
 
     print(f"  TREC: {len(train)} train, {len(test)} test")
     print(f"  Labels: {list(TREC_COARSE_LABELS.values())}")
+    print(f"  Saved to: {task_dir}")
+
+
+def prepare_trec50():
+    """Download and prepare TREC-50 fine-grained question classification dataset."""
+    from datasets import load_dataset
+
+    print("Preparing TREC-50 (fine-grained) dataset...")
+    task_dir = os.path.join(DATA_DIR, "trec50")
+    os.makedirs(task_dir, exist_ok=True)
+
+    dataset = load_dataset("trec")
+
+    def add_fine_label(example):
+        example["label_text"] = TREC_FINE_LABELS.get(
+            example["fine_label"], str(example["fine_label"])
+        )
+        return example
+
+    train = dataset["train"].map(add_fine_label)
+    test = dataset["test"].map(add_fine_label)
+
+    train.save_to_disk(os.path.join(task_dir, "train"))
+    test.save_to_disk(os.path.join(task_dir, "test"))
+
+    unique_labels = sorted(set(TREC_FINE_LABELS.values()))
+    print(f"  TREC-50: {len(train)} train, {len(test)} test")
+    print(f"  Labels: {len(unique_labels)} fine-grained classes")
     print(f"  Saved to: {task_dir}")
 
 
@@ -182,6 +232,7 @@ def prepare_ecommerce():
 
 TASK_PREPARERS = {
     "trec": prepare_trec,
+    "trec50": prepare_trec50,
     "text2sql": prepare_text2sql,
     "ecommerce": prepare_ecommerce,
 }

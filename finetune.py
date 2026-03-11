@@ -76,6 +76,11 @@ TASK_PROMPTS = {
         "input_template": "Classify this question: {text}",
         "output_key": "label_text",
     },
+    "trec50": {
+        "system": "You are a fine-grained question classifier. Classify the question into one of 50 categories in the format 'coarse:fine' (e.g. 'entity:animal', 'numeric:date', 'human:individual').",
+        "input_template": "Classify this question (fine-grained): {text}",
+        "output_key": "label_text",
+    },
     "text2sql": {
         "system": "You are a SQL expert. Given a natural language question and database schema, generate the correct SQL query.",
         "input_template": "Schema:\n{schema}\n\nQuestion: {question}\n\nSQL:",

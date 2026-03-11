@@ -19,10 +19,31 @@ from sklearn.metrics import accuracy_score, f1_score, classification_report
 
 TREC_LABELS = ["ABBREVIATION", "ENTITY", "DESCRIPTION", "HUMAN", "LOCATION", "NUMERIC"]
 
+TREC50_LABELS = [
+    "abbreviation:abbreviation", "abbreviation:expansion",
+    "entity:animal", "entity:body", "entity:color", "entity:creation",
+    "entity:currency", "entity:disease", "entity:event", "entity:food",
+    "entity:instrument", "entity:language", "entity:letter", "entity:other",
+    "entity:plant", "entity:product", "entity:religion", "entity:sport",
+    "entity:substance", "entity:symbol", "entity:technique", "entity:term",
+    "entity:vehicle", "entity:word", "description:definition",
+    "description:description", "description:manner", "description:reason",
+    "human:group", "human:individual", "human:title", "human:description",
+    "location:city", "location:country", "location:mountain", "location:other",
+    "location:state", "numeric:code", "numeric:count", "numeric:date",
+    "numeric:distance", "numeric:money", "numeric:order", "numeric:other",
+    "numeric:percent", "numeric:period", "numeric:speed", "numeric:temperature",
+    "numeric:size", "numeric:weight",
+]
+
 TASK_PROMPTS = {
     "trec": {
         "system": "You are a question classifier. Classify the given question into one of these categories: ABBREVIATION, ENTITY, DESCRIPTION, HUMAN, LOCATION, NUMERIC.",
         "input_template": "Classify this question: {text}",
+    },
+    "trec50": {
+        "system": "You are a fine-grained question classifier. Classify the question into one of 50 categories in the format 'coarse:fine' (e.g. 'entity:animal', 'numeric:date', 'human:individual').",
+        "input_template": "Classify this question (fine-grained): {text}",
     },
     "text2sql": {
         "system": "You are a SQL expert. Given a natural language question and database schema, generate the correct SQL query.",
@@ -120,6 +141,26 @@ def eval_trec(predictions, references):
     return {"accuracy": accuracy, "f1": f1}
 
 
+def eval_trec50(predictions, references):
+    """Evaluate TREC-50 fine-grained question classification."""
+    pred_labels = []
+    for pred in predictions:
+        pred_lower = pred.lower().strip()
+        matched = None
+        for label in TREC50_LABELS:
+            if label in pred_lower:
+                matched = label
+                break
+        pred_labels.append(matched if matched else pred_lower)
+
+    ref_labels = [r.lower().strip() for r in references]
+
+    accuracy = accuracy_score(ref_labels, pred_labels)
+    f1 = f1_score(ref_labels, pred_labels, average="macro", zero_division=0)
+
+    return {"accuracy": accuracy, "f1": f1}
+
+
 def eval_text2sql(predictions, references):
     """Evaluate Text2SQL (simple string match + normalized comparison)."""
     def normalize_sql(sql):
@@ -150,12 +191,14 @@ def eval_ecommerce(predictions, references):
 
 EVAL_FUNCTIONS = {
     "trec": eval_trec,
+    "trec50": eval_trec50,
     "text2sql": eval_text2sql,
     "ecommerce": eval_ecommerce,
 }
 
 REFERENCE_KEYS = {
     "trec": "label_text",
+    "trec50": "label_text",
     "text2sql": "sql",
     "ecommerce": "category",
 }
