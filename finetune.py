@@ -29,24 +29,25 @@ from eval import evaluate_task
 
 # ---------------------------------------------------------------------------
 # Hyperparameters (EDIT THESE — this is what the agent tunes)
+# Environment variables override defaults (for parallel SLURM submissions)
 # ---------------------------------------------------------------------------
 
 # Task selection
-TASK = "trec"  # Options: "trec", "text2sql", "ecommerce"
+TASK = os.environ.get("AR_TASK", "trec")  # Options: "trec", "trec50", "text2sql", "ecommerce"
 
 # Model selection
-MODEL_NAME = "Qwen/Qwen3-0.6B"  # Options: Qwen3-0.6B, 1.7B, 4B, 8B
+MODEL_NAME = os.environ.get("AR_MODEL", "Qwen/Qwen3-0.6B")  # Options: Qwen3-0.6B, 1.7B, 4B, 8B
 
 # LoRA configuration
-LORA_RANK = 32
-LORA_ALPHA = 64
+LORA_RANK = int(os.environ.get("AR_LORA_RANK", 16))
+LORA_ALPHA = int(os.environ.get("AR_LORA_ALPHA", 32))
 LORA_DROPOUT = 0.05
 LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj"]
-USE_LORA = True  # Set False for full fine-tuning (needs more VRAM)
+USE_LORA = os.environ.get("AR_USE_LORA", "true").lower() == "true"
 
 # Training hyperparameters
-LEARNING_RATE = 2e-4
-NUM_EPOCHS = 3
+LEARNING_RATE = float(os.environ.get("AR_LR", 2e-4))
+NUM_EPOCHS = int(os.environ.get("AR_EPOCHS", 3))
 BATCH_SIZE = 2
 GRADIENT_ACCUMULATION_STEPS = 8
 WARMUP_RATIO = 0.1
@@ -55,7 +56,7 @@ MAX_SEQ_LEN = 256
 LR_SCHEDULER = "cosine"  # Options: "cosine", "linear", "constant"
 
 # Quantization (for QLoRA)
-USE_4BIT = False  # Enable for QLoRA (saves VRAM, may lose some quality)
+USE_4BIT = os.environ.get("AR_USE_4BIT", "false").lower() == "true"
 
 # Reproducibility
 SEED = 42
