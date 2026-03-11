@@ -43,8 +43,8 @@ LORA_RANK = 16
 LORA_ALPHA = 32
 LEARNING_RATE = 2e-4
 NUM_EPOCHS = 3
-BATCH_SIZE = 4
-GRADIENT_ACCUMULATION_STEPS = 4
+BATCH_SIZE = 2
+GRADIENT_ACCUMULATION_STEPS = 8
 
 # Quantization settings
 QUANTIZE_BITS = 4  # 4-bit or 8-bit
@@ -52,7 +52,7 @@ QUANTIZE_BITS = 4  # 4-bit or 8-bit
 # Paths
 DATA_DIR = os.path.expanduser("~/autoresearch/data")
 OUTPUT_DIR = os.path.expanduser("~/autoresearch/output")
-MAX_SEQ_LEN = 512
+MAX_SEQ_LEN = 256
 
 # ---------------------------------------------------------------------------
 # Pipeline steps
@@ -143,7 +143,8 @@ def step_finetune(model, tokenizer, state):
         lr_scheduler_type="cosine",
         logging_steps=10,
         save_strategy="no",
-        bf16=torch.cuda.is_available(),
+        fp16=torch.cuda.is_available(),
+        bf16=False,
         dataloader_num_workers=4,
         seed=42,
         report_to="none",
@@ -218,8 +219,9 @@ def main():
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME,
         trust_remote_code=True,
-        torch_dtype=torch.bfloat16,
+        torch_dtype=torch.float16,
         device_map="auto",
+        attn_implementation="eager",
     )
 
     original_params = sum(p.numel() for p in model.parameters())

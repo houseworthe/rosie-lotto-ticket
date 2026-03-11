@@ -28,12 +28,12 @@ from datasets import load_from_disk
 # Configuration (EDIT THESE)
 # ---------------------------------------------------------------------------
 
-MODEL_NAME = "Qwen/Qwen3-4B"  # Source model to prune
+MODEL_NAME = "Qwen/Qwen3-0.6B"  # Source model to prune
 
 # Layer pruning
 PRUNE_LAYERS = True
 LAYER_STRATEGY = "importance"  # Options: "uniform", "last", "middle", "importance"
-LAYER_DROP_FRACTION = 0.25     # Fraction of layers to remove (0.25 = drop 25%)
+LAYER_DROP_FRACTION = 0.10     # Fraction of layers to remove (gentler — 10%)
 # For "uniform": drop every Nth layer
 # For "last": drop the last N layers (before final norm)
 # For "middle": drop from the middle
