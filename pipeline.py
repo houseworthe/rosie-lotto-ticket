@@ -134,15 +134,23 @@ def step_finetune(model, tokenizer, state):
     train_dataset = load_from_disk(os.path.join(DATA_DIR, TASK, "train"))
     train_dataset = prepare_dataset(train_dataset, task_config, tokenizer, MAX_SEQ_LEN)
 
-    # If vocab was pruned, remap token IDs in training data
+    # If vocab was pruned AND tokenizer is NOT already a wrapper, remap IDs
+    # (RemappedTokenizerWrapper already remaps during tokenization)
     id_map = state.get("id_map")
-    if id_map:
+    if id_map and not isinstance(tokenizer, RemappedTokenizerWrapper):
         print("  Remapping training data token IDs for pruned vocabulary...")
         def remap_ids(example):
             example["input_ids"] = [id_map.get(tid, 0) for tid in example["input_ids"]]
             example["labels"] = [id_map.get(tid, -100) if tid != -100 else -100 for tid in example["labels"]]
             return example
         train_dataset = train_dataset.map(remap_ids)
+    elif id_map:
+        # Tokenizer wrapper handled input_ids remapping; still need to remap labels
+        print("  Remapping labels for pruned vocabulary (tokenizer already remapped input_ids)...")
+        def remap_labels(example):
+            example["labels"] = [id_map.get(tid, -100) if tid != -100 else -100 for tid in example["labels"]]
+            return example
+        train_dataset = train_dataset.map(remap_labels)
 
     # Train
     run_name = f"pipeline_{'-'.join(PIPELINE)}_{MODEL_NAME.split('/')[-1]}"
@@ -221,15 +229,22 @@ class RemappedTokenizerWrapper:
     def __call__(self, *args, **kwargs):
         result = self._tokenizer(*args, **kwargs)
         # Remap input_ids
+        import torch as _torch
+        input_ids = result["input_ids"]
+        is_tensor = isinstance(input_ids, _torch.Tensor)
         remapped = []
-        for ids in result["input_ids"]:
+        for ids in input_ids:
             if hasattr(ids, 'tolist'):
                 ids_list = ids.tolist()
             else:
                 ids_list = list(ids)
             remapped.append([self._id_map.get(tid, 0) for tid in ids_list])
-        import torch as _torch
-        result["input_ids"] = _torch.tensor(remapped, device=result["input_ids"].device if hasattr(result["input_ids"], 'device') else 'cpu')
+        # Return same format: tensor if input was tensor (same-length rows),
+        # otherwise list of lists (datasets .map() expects plain lists)
+        if is_tensor:
+            result["input_ids"] = _torch.tensor(remapped, device=input_ids.device)
+        else:
+            result["input_ids"] = remapped
         return result
 
     def decode(self, ids, **kwargs):
