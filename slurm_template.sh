@@ -48,6 +48,7 @@ echo ""
 
 export HF_HOME=~/autoresearch/.hf_cache
 export TRANSFORMERS_CACHE=~/autoresearch/.hf_cache
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
 
 cd ~/autoresearch
 python $SCRIPT

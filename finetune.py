@@ -47,11 +47,11 @@ USE_LORA = True  # Set False for full fine-tuning (needs more VRAM)
 # Training hyperparameters
 LEARNING_RATE = 2e-4
 NUM_EPOCHS = 3
-BATCH_SIZE = 4
-GRADIENT_ACCUMULATION_STEPS = 4
+BATCH_SIZE = 2
+GRADIENT_ACCUMULATION_STEPS = 8
 WARMUP_RATIO = 0.1
 WEIGHT_DECAY = 0.01
-MAX_SEQ_LEN = 512
+MAX_SEQ_LEN = 256
 LR_SCHEDULER = "cosine"  # Options: "cosine", "linear", "constant"
 
 # Quantization (for QLoRA)
@@ -272,7 +272,7 @@ def main():
     print(f"Loading model: {MODEL_NAME}")
     model_kwargs = {
         "trust_remote_code": True,
-        "torch_dtype": torch.float32,  # Load in fp32, let Trainer handle mixed precision
+        "torch_dtype": torch_dtype,  # Load in native dtype (fp16 on T4, bf16 on A100+)
         "device_map": "auto",
         "attn_implementation": "eager",  # SDPA causes cuBLAS INVALID_VALUE on T4
     }
@@ -346,7 +346,7 @@ def main():
         save_total_limit=1,
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
-        fp16=False,  # Disabled — cuBLAS INVALID_VALUE on T4 with fp16 mixed precision
+        fp16=use_fp16,  # Re-enabled with smaller batch to reduce VRAM pressure
         bf16=use_bf16,
         dataloader_num_workers=4,
         seed=SEED,
