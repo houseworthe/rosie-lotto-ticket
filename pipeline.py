@@ -80,6 +80,10 @@ def step_vocab_prune(model, tokenizer, state):
     state["vocab_pruned_size"] = len(keep_ids)
     state["id_map"] = id_map
 
+    # Wrap tokenizer so all subsequent steps use remapped IDs
+    tokenizer = RemappedTokenizerWrapper(tokenizer, id_map)
+    print(f"  Tokenizer wrapped with ID remapping ({len(id_map)} tokens)")
+
     return model, tokenizer, state
 
 
@@ -129,6 +133,16 @@ def step_finetune(model, tokenizer, state):
     task_config = TASK_PROMPTS[TASK]
     train_dataset = load_from_disk(os.path.join(DATA_DIR, TASK, "train"))
     train_dataset = prepare_dataset(train_dataset, task_config, tokenizer, MAX_SEQ_LEN)
+
+    # If vocab was pruned, remap token IDs in training data
+    id_map = state.get("id_map")
+    if id_map:
+        print("  Remapping training data token IDs for pruned vocabulary...")
+        def remap_ids(example):
+            example["input_ids"] = [id_map.get(tid, 0) for tid in example["input_ids"]]
+            example["labels"] = [id_map.get(tid, -100) if tid != -100 else -100 for tid in example["labels"]]
+            return example
+        train_dataset = train_dataset.map(remap_ids)
 
     # Train
     run_name = f"pipeline_{'-'.join(PIPELINE)}_{MODEL_NAME.split('/')[-1]}"
@@ -189,6 +203,53 @@ def step_quantize(model, tokenizer, state):
     state["quantize_bits"] = QUANTIZE_BITS
 
     return model, tokenizer, state
+
+
+class RemappedTokenizerWrapper:
+    """Wraps a tokenizer to remap token IDs after vocabulary pruning."""
+
+    def __init__(self, tokenizer, id_map):
+        self._tokenizer = tokenizer
+        self._id_map = id_map  # old_id -> new_id
+        self._reverse_map = {v: k for k, v in id_map.items()}  # new_id -> old_id
+        # Update special token IDs
+        self.pad_token_id = id_map.get(tokenizer.pad_token_id, 0)
+        self.eos_token_id = id_map.get(tokenizer.eos_token_id, 0)
+        self.bos_token_id = id_map.get(tokenizer.bos_token_id, 0) if tokenizer.bos_token_id is not None else None
+        self.vocab_size = len(id_map)
+
+    def __call__(self, *args, **kwargs):
+        result = self._tokenizer(*args, **kwargs)
+        # Remap input_ids
+        remapped = []
+        for ids in result["input_ids"]:
+            if hasattr(ids, 'tolist'):
+                ids_list = ids.tolist()
+            else:
+                ids_list = list(ids)
+            remapped.append([self._id_map.get(tid, 0) for tid in ids_list])
+        import torch as _torch
+        result["input_ids"] = _torch.tensor(remapped, device=result["input_ids"].device if hasattr(result["input_ids"], 'device') else 'cpu')
+        return result
+
+    def decode(self, ids, **kwargs):
+        if hasattr(ids, 'tolist'):
+            ids = ids.tolist()
+        old_ids = [self._reverse_map.get(tid, tid) for tid in ids]
+        return self._tokenizer.decode(old_ids, **kwargs)
+
+    def encode(self, *args, **kwargs):
+        ids = self._tokenizer.encode(*args, **kwargs)
+        return [self._id_map.get(tid, 0) for tid in ids]
+
+    def apply_chat_template(self, *args, **kwargs):
+        return self._tokenizer.apply_chat_template(*args, **kwargs)
+
+    def save_pretrained(self, *args, **kwargs):
+        return self._tokenizer.save_pretrained(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._tokenizer, name)
 
 
 STEP_FUNCTIONS = {
