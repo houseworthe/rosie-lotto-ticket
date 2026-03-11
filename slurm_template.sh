@@ -3,7 +3,7 @@
 #SBATCH --partition=teaching
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=8
-#SBATCH --time=00:15:00
+#SBATCH --time=00:30:00
 #SBATCH --output=slurm-%j.out
 #SBATCH --error=slurm-%j.out
 
