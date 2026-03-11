@@ -38,8 +38,8 @@ TASK = "trec"  # Options: "trec", "text2sql", "ecommerce"
 MODEL_NAME = "Qwen/Qwen3-0.6B"  # Options: Qwen3-0.6B, 1.7B, 4B, 8B
 
 # LoRA configuration
-LORA_RANK = 8
-LORA_ALPHA = 16
+LORA_RANK = 32
+LORA_ALPHA = 64
 LORA_DROPOUT = 0.05
 LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj"]
 USE_LORA = True  # Set False for full fine-tuning (needs more VRAM)
