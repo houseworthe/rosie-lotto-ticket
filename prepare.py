@@ -226,6 +226,141 @@ def prepare_ecommerce():
     print(f"  Saved to: {task_dir}")
 
 
+def prepare_sst2():
+    """Download and prepare SST-2 sentiment classification dataset."""
+    from datasets import load_dataset
+
+    print("Preparing SST-2 dataset...")
+    task_dir = os.path.join(DATA_DIR, "sst2")
+    os.makedirs(task_dir, exist_ok=True)
+
+    # Load SST-2 from GLUE
+    dataset = load_dataset("glue", "sst2")
+
+    def add_label_text(example):
+        # 0 = negative, 1 = positive
+        example["label_text"] = "positive" if example["label"] == 1 else "negative"
+        return example
+
+    train = dataset["train"].map(add_label_text)
+    test = dataset["validation"].map(add_label_text)  # SST-2 uses validation as test
+
+    train.save_to_disk(os.path.join(task_dir, "train"))
+    test.save_to_disk(os.path.join(task_dir, "test"))
+
+    print(f"  SST-2: {len(train)} train, {len(test)} test")
+    print(f"  Labels: positive, negative")
+    print(f"  Saved to: {task_dir}")
+
+
+def prepare_agnews():
+    """Download and prepare AG News classification dataset."""
+    from datasets import load_dataset
+
+    print("Preparing AG News dataset...")
+    task_dir = os.path.join(DATA_DIR, "agnews")
+    os.makedirs(task_dir, exist_ok=True)
+
+    # Load AG News
+    dataset = load_dataset("ag_news")
+
+    label_map = {0: "World", 1: "Sports", 2: "Business", 3: "Technology"}
+
+    def add_label_text(example):
+        example["label_text"] = label_map[example["label"]]
+        return example
+
+    train = dataset["train"].map(add_label_text)
+    test = dataset["test"].map(add_label_text)
+
+    train.save_to_disk(os.path.join(task_dir, "train"))
+    test.save_to_disk(os.path.join(task_dir, "test"))
+
+    print(f"  AG News: {len(train)} train, {len(test)} test")
+    print(f"  Labels: {list(label_map.values())}")
+    print(f"  Saved to: {task_dir}")
+
+
+def prepare_mnli():
+    """Download and prepare MNLI natural language inference dataset."""
+    from datasets import load_dataset
+
+    print("Preparing MNLI dataset...")
+    task_dir = os.path.join(DATA_DIR, "mnli")
+    os.makedirs(task_dir, exist_ok=True)
+
+    # Load MNLI from GLUE
+    dataset = load_dataset("glue", "mnli")
+
+    label_map = {0: "entailment", 1: "neutral", 2: "contradiction"}
+
+    def format_mnli(example):
+        # Combine premise and hypothesis
+        example["text"] = f"Premise: {example['premise']} Hypothesis: {example['hypothesis']}"
+        example["label_text"] = label_map[example["label"]]
+        return example
+
+    train = dataset["train"].map(format_mnli)
+    # Use matched validation as test set
+    test = dataset["validation_matched"].map(format_mnli)
+
+    # Subsample for faster training (MNLI is huge)
+    if len(train) > 20000:
+        train = train.shuffle(seed=42).select(range(20000))
+    if len(test) > 5000:
+        test = test.shuffle(seed=42).select(range(5000))
+
+    train.save_to_disk(os.path.join(task_dir, "train"))
+    test.save_to_disk(os.path.join(task_dir, "test"))
+
+    print(f"  MNLI: {len(train)} train, {len(test)} test")
+    print(f"  Labels: {list(label_map.values())}")
+    print(f"  Saved to: {task_dir}")
+
+
+def prepare_dbpedia():
+    """Download and prepare DBpedia 14-class classification dataset."""
+    from datasets import load_dataset
+
+    print("Preparing DBpedia dataset...")
+    task_dir = os.path.join(DATA_DIR, "dbpedia")
+    os.makedirs(task_dir, exist_ok=True)
+
+    # Load DBpedia 14
+    dataset = load_dataset("dbpedia_14")
+
+    # DBpedia labels (14 ontology classes)
+    label_map = {
+        0: "Company", 1: "EducationalInstitution", 2: "Artist",
+        3: "Athlete", 4: "OfficeHolder", 5: "MeanOfTransportation",
+        6: "Building", 7: "NaturalPlace", 8: "Village",
+        9: "Animal", 10: "Plant", 11: "Album",
+        12: "Film", 13: "WrittenWork"
+    }
+
+    def format_dbpedia(example):
+        # Combine title and content
+        example["text"] = f"{example['title']} {example['content']}"
+        example["label_text"] = label_map[example["label"]]
+        return example
+
+    train = dataset["train"].map(format_dbpedia)
+    test = dataset["test"].map(format_dbpedia)
+
+    # Subsample for faster training
+    if len(train) > 15000:
+        train = train.shuffle(seed=42).select(range(15000))
+    if len(test) > 3000:
+        test = test.shuffle(seed=42).select(range(3000))
+
+    train.save_to_disk(os.path.join(task_dir, "train"))
+    test.save_to_disk(os.path.join(task_dir, "test"))
+
+    print(f"  DBpedia: {len(train)} train, {len(test)} test")
+    print(f"  Labels: {len(label_map)} ontology classes")
+    print(f"  Saved to: {task_dir}")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -235,6 +370,10 @@ TASK_PREPARERS = {
     "trec50": prepare_trec50,
     "text2sql": prepare_text2sql,
     "ecommerce": prepare_ecommerce,
+    "sst2": prepare_sst2,
+    "agnews": prepare_agnews,
+    "mnli": prepare_mnli,
+    "dbpedia": prepare_dbpedia,
 }
 
 if __name__ == "__main__":

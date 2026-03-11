@@ -33,7 +33,7 @@ from eval import evaluate_task
 # ---------------------------------------------------------------------------
 
 # Task selection
-TASK = os.environ.get("AR_TASK", "trec")  # Options: "trec", "trec50", "text2sql", "ecommerce"
+TASK = os.environ.get("AR_TASK", "trec")  # Options: "trec", "trec50", "text2sql", "ecommerce", "sst2", "agnews", "mnli", "dbpedia"
 
 # Model selection
 MODEL_NAME = os.environ.get("AR_MODEL", "Qwen/Qwen3-0.6B")  # Options: Qwen3-0.6B, 1.7B, 4B, 8B
@@ -90,6 +90,26 @@ TASK_PROMPTS = {
         "system": "You are a product classifier. Classify the given product description into the correct category.",
         "input_template": "Classify this product: {text}",
         "output_key": "category",
+    },
+    "sst2": {
+        "system": "You are a sentiment analyzer. Classify the given sentence as either positive or negative sentiment.",
+        "input_template": "Analyze the sentiment of this sentence: {sentence}",
+        "output_key": "label_text",
+    },
+    "agnews": {
+        "system": "You are a news categorizer. Classify the given news article into one of these categories: World, Sports, Business, Technology.",
+        "input_template": "Categorize this news article: {text}",
+        "output_key": "label_text",
+    },
+    "mnli": {
+        "system": "You are a natural language inference expert. Given a premise and hypothesis, determine if the hypothesis entails, contradicts, or is neutral to the premise.",
+        "input_template": "Determine the relationship: {text}",
+        "output_key": "label_text",
+    },
+    "dbpedia": {
+        "system": "You are an ontology classifier. Classify the given text into one of these categories: Company, EducationalInstitution, Artist, Athlete, OfficeHolder, MeanOfTransportation, Building, NaturalPlace, Village, Animal, Plant, Album, Film, WrittenWork.",
+        "input_template": "Classify this entity: {text}",
+        "output_key": "label_text",
     },
 }
 

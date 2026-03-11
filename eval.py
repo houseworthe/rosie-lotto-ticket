@@ -53,6 +53,22 @@ TASK_PROMPTS = {
         "system": "You are a product classifier. Classify the given product description into the correct category.",
         "input_template": "Classify this product: {text}",
     },
+    "sst2": {
+        "system": "You are a sentiment analyzer. Classify the given sentence as either positive or negative sentiment.",
+        "input_template": "Analyze the sentiment of this sentence: {sentence}",
+    },
+    "agnews": {
+        "system": "You are a news categorizer. Classify the given news article into one of these categories: World, Sports, Business, Technology.",
+        "input_template": "Categorize this news article: {text}",
+    },
+    "mnli": {
+        "system": "You are a natural language inference expert. Given a premise and hypothesis, determine if the hypothesis entails, contradicts, or is neutral to the premise.",
+        "input_template": "Determine the relationship: {text}",
+    },
+    "dbpedia": {
+        "system": "You are an ontology classifier. Classify the given text into one of these categories: Company, EducationalInstitution, Artist, Athlete, OfficeHolder, MeanOfTransportation, Building, NaturalPlace, Village, Animal, Plant, Album, Film, WrittenWork.",
+        "input_template": "Classify this entity: {text}",
+    },
 }
 
 
@@ -189,11 +205,105 @@ def eval_ecommerce(predictions, references):
     return {"accuracy": accuracy, "f1": f1}
 
 
+def eval_sst2(predictions, references):
+    """Evaluate SST-2 sentiment classification."""
+    pred_labels = []
+    for pred in predictions:
+        pred_lower = pred.strip().lower()
+        if "positive" in pred_lower:
+            pred_labels.append("positive")
+        elif "negative" in pred_lower:
+            pred_labels.append("negative")
+        else:
+            pred_labels.append(pred_lower)  # fallback
+
+    ref_labels = [r.strip().lower() for r in references]
+
+    accuracy = accuracy_score(ref_labels, pred_labels)
+    f1 = f1_score(ref_labels, pred_labels, average="binary", pos_label="positive", zero_division=0)
+
+    return {"accuracy": accuracy, "f1": f1}
+
+
+def eval_agnews(predictions, references):
+    """Evaluate AG News classification."""
+    news_labels = ["world", "sports", "business", "technology"]
+    
+    pred_labels = []
+    for pred in predictions:
+        pred_lower = pred.strip().lower()
+        matched = None
+        for label in news_labels:
+            if label in pred_lower:
+                matched = label
+                break
+        pred_labels.append(matched if matched else pred_lower)
+
+    ref_labels = [r.strip().lower() for r in references]
+
+    accuracy = accuracy_score(ref_labels, pred_labels)
+    f1 = f1_score(ref_labels, pred_labels, average="macro", zero_division=0)
+
+    return {"accuracy": accuracy, "f1": f1}
+
+
+def eval_mnli(predictions, references):
+    """Evaluate MNLI natural language inference."""
+    nli_labels = ["entailment", "neutral", "contradiction"]
+    
+    pred_labels = []
+    for pred in predictions:
+        pred_lower = pred.strip().lower()
+        matched = None
+        for label in nli_labels:
+            if label in pred_lower:
+                matched = label
+                break
+        pred_labels.append(matched if matched else pred_lower)
+
+    ref_labels = [r.strip().lower() for r in references]
+
+    accuracy = accuracy_score(ref_labels, pred_labels)
+    f1 = f1_score(ref_labels, pred_labels, average="macro", zero_division=0)
+
+    return {"accuracy": accuracy, "f1": f1}
+
+
+def eval_dbpedia(predictions, references):
+    """Evaluate DBpedia ontology classification."""
+    dbpedia_labels = [
+        "company", "educationalinstitution", "artist", "athlete", 
+        "officeholder", "meanoftransportation", "building", "naturalplace", 
+        "village", "animal", "plant", "album", "film", "writtenwork"
+    ]
+    
+    pred_labels = []
+    for pred in predictions:
+        pred_lower = pred.strip().lower()
+        matched = None
+        for label in dbpedia_labels:
+            if label in pred_lower:
+                matched = label
+                break
+        pred_labels.append(matched if matched else pred_lower)
+
+    ref_labels = [r.strip().lower() for r in references]
+
+    accuracy = accuracy_score(ref_labels, pred_labels)
+    f1 = f1_score(ref_labels, pred_labels, average="macro", zero_division=0)
+
+    return {"accuracy": accuracy, "f1": f1}
+
+
 EVAL_FUNCTIONS = {
     "trec": eval_trec,
     "trec50": eval_trec50,
     "text2sql": eval_text2sql,
     "ecommerce": eval_ecommerce,
+    "sst2": eval_sst2,
+    "agnews": eval_agnews,
+    "mnli": eval_mnli,
+    "dbpedia": eval_dbpedia,
 }
 
 REFERENCE_KEYS = {
@@ -201,6 +311,10 @@ REFERENCE_KEYS = {
     "trec50": "label_text",
     "text2sql": "sql",
     "ecommerce": "category",
+    "sst2": "label_text",
+    "agnews": "label_text",
+    "mnli": "label_text",
+    "dbpedia": "label_text",
 }
 
 
