@@ -20,9 +20,17 @@
 # Default script if not specified
 SCRIPT=${SCRIPT:-finetune.py}
 
-# Load required modules
-module load conda
-module load cuda
+# Load required modules (conda module may not exist on all nodes)
+module load conda 2>/dev/null || true
+module load cuda 2>/dev/null || true
+
+# Ensure conda is available
+if ! command -v conda &>/dev/null; then
+    source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null || \
+    source /opt/conda/etc/profile.d/conda.sh 2>/dev/null || \
+    source ~/anaconda3/etc/profile.d/conda.sh 2>/dev/null || \
+    { echo "ERROR: conda not found"; exit 1; }
+fi
 
 echo "=========================================="
 echo "Job ID: $SLURM_JOB_ID"
