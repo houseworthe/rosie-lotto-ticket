@@ -44,7 +44,8 @@ nvidia-smi
 echo "---"
 echo ""
 
-# Activate conda environment
+# Activate conda environment (source conda.sh for non-login shells)
+source /usr/local/miniforge/miniforge3/etc/profile.d/conda.sh
 conda activate autoresearch
 
 echo "Python: $(python --version)"
