@@ -252,7 +252,14 @@ class RemappedTokenizerWrapper:
         is_tensor = isinstance(input_ids, _torch.Tensor)
         
         # Handle both single sequences and batches
-        if input_ids and isinstance(input_ids[0], (list, _torch.Tensor)) or is_tensor and len(input_ids.shape) > 1:
+        # Check dimensions carefully to avoid "Boolean value of Tensor" error
+        is_batch = False
+        if is_tensor:
+            is_batch = len(input_ids.shape) > 1
+        elif isinstance(input_ids, list) and len(input_ids) > 0:
+            is_batch = isinstance(input_ids[0], (list, _torch.Tensor))
+        
+        if is_batch:
             # Batch case
             if is_tensor:
                 ids_list = input_ids.tolist()
