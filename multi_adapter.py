@@ -83,6 +83,17 @@ def find_adapters(checkpoint_dir, model_name):
         if os.path.isdir(full_path) and os.path.exists(config_path):
             # Extract task name from directory name
             # Expected format: {task}_{model}_r{rank}_lr{lr}
+            # Check adapter config to verify it matches our base model
+            try:
+                with open(config_path) as cf:
+                    adapter_cfg = json.load(cf)
+                adapter_base = adapter_cfg.get("base_model_name_or_path", "")
+                if model_short not in adapter_base and model_name not in adapter_base:
+                    # Skip adapters trained on a different base model
+                    continue
+            except (json.JSONDecodeError, KeyError):
+                pass  # If we can't read config, try anyway
+            
             parts = entry.split("_")
             if len(parts) >= 2:
                 task = parts[0]
