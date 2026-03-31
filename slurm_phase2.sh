@@ -4,9 +4,9 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --time=02:00:00
-#SBATCH --output=phase2_%j.out
-#SBATCH --error=phase2_%j.err
+#SBATCH --time=04:00:00
+#SBATCH --output=/home/ad.msoe.edu/houseworthe/autoresearch/phase2_%j.out
+#SBATCH --error=/home/ad.msoe.edu/houseworthe/autoresearch/phase2_%j.err
 
 # Phase 2: Multi-Adapter Loading & Composition Testing
 # Partition: dgx (V100) — DO NOT USE T4 (cuBLAS crash)
@@ -24,8 +24,9 @@ conda activate autoresearch
 
 cd ~/autoresearch
 
-# Run phase 2 (all tests: verify + blend + cross-eval)
-python multi_adapter.py 2>&1
+# Run phase 2 with 500 sample cap per eval (5 adapters × 5 tasks × 500 = manageable)
+# Use --max-eval-samples 0 for full test sets (will take 12+ hours)
+python -u multi_adapter.py --max-eval-samples 500 2>&1
 
 echo ""
 echo "=== Phase 2 Complete ==="

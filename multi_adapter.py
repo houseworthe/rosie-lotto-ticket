@@ -34,6 +34,11 @@ from eval import evaluate_task
 # Configuration
 # ---------------------------------------------------------------------------
 
+# Max eval samples per task for Phase 2 (full test sets are too slow for
+# cross-eval matrix: 5 adapters × 5 tasks × 70k samples = impossible).
+# Use --max-eval-samples to override.  Set to 0 for full test set.
+DEFAULT_MAX_EVAL_SAMPLES = 500
+
 MODEL_NAME = os.environ.get("AR_MODEL", "Qwen/Qwen3-0.6B")
 CHECKPOINT_DIR = os.path.expanduser("~/autoresearch/checkpoints")
 DATA_DIR = os.path.expanduser("~/autoresearch/data")
@@ -117,7 +122,7 @@ def find_adapters(checkpoint_dir, model_name):
 # Phase 2a: Verify each adapter independently
 # ---------------------------------------------------------------------------
 
-def verify_adapters(base_model, tokenizer, adapters, data_dir):
+def verify_adapters(base_model, tokenizer, adapters, data_dir, max_eval_samples=None):
     """Load each adapter independently and verify it matches original eval scores."""
     print("\n" + "=" * 60)
     print("PHASE 2a: VERIFY INDIVIDUAL ADAPTERS")
@@ -148,6 +153,7 @@ def verify_adapters(base_model, tokenizer, adapters, data_dir):
                 data_dir=data_dir,
                 max_seq_len=256,
                 batch_size=2,
+                max_samples=max_eval_samples,
             )
             
             results[task] = {
@@ -156,7 +162,7 @@ def verify_adapters(base_model, tokenizer, adapters, data_dir):
                 "status": "ok",
             }
             
-            print(f"    Results: {eval_results}")
+            print(f"    Results: {eval_results}", flush=True)
             
             # Unload adapter to free memory
             del model
@@ -177,7 +183,7 @@ def verify_adapters(base_model, tokenizer, adapters, data_dir):
 # Phase 2b: Naive weight blending
 # ---------------------------------------------------------------------------
 
-def test_naive_blending(base_model, tokenizer, adapters, data_dir):
+def test_naive_blending(base_model, tokenizer, adapters, data_dir, max_eval_samples=None):
     """Load multiple adapters and test naive equal-weight blending."""
     print("\n" + "=" * 60)
     print("PHASE 2b: NAIVE WEIGHT BLENDING")
@@ -238,13 +244,14 @@ def test_naive_blending(base_model, tokenizer, adapters, data_dir):
                 data_dir=data_dir,
                 max_seq_len=256,
                 batch_size=2,
+                max_samples=max_eval_samples,
             )
             results[task] = {
                 "metrics": eval_results,
                 "blend_weights": dict(zip(adapter_names, blend_weights)),
                 "status": "ok",
             }
-            print(f"  Blended results: {eval_results}")
+            print(f"  Blended results: {eval_results}", flush=True)
         except Exception as e:
             print(f"  ERROR: {e}")
             results[task] = {"error": str(e), "status": "error"}
@@ -269,9 +276,10 @@ def test_naive_blending(base_model, tokenizer, adapters, data_dir):
                 data_dir=data_dir,
                 max_seq_len=256,
                 batch_size=2,
+                max_samples=max_eval_samples,
             )
             sanity_results[name] = eval_results
-            print(f"  {name} (individual after multi-load): {eval_results}")
+            print(f"  {name} (individual after multi-load): {eval_results}", flush=True)
         except Exception as e:
             print(f"  {name} ERROR: {e}")
             sanity_results[name] = {"error": str(e)}
@@ -289,7 +297,7 @@ def test_naive_blending(base_model, tokenizer, adapters, data_dir):
 # Phase 2c: Cross-task evaluation matrix
 # ---------------------------------------------------------------------------
 
-def cross_task_eval(base_model, tokenizer, adapters, data_dir):
+def cross_task_eval(base_model, tokenizer, adapters, data_dir, max_eval_samples=None):
     """Evaluate each adapter on ALL tasks to measure cross-task interference."""
     print("\n" + "=" * 60)
     print("PHASE 2c: CROSS-TASK EVALUATION MATRIX")
@@ -327,12 +335,13 @@ def cross_task_eval(base_model, tokenizer, adapters, data_dir):
                     data_dir=data_dir,
                     max_seq_len=256,
                     batch_size=2,
+                    max_samples=max_eval_samples,
                 )
                 matrix[train_task][eval_task] = eval_results
                 
                 marker = " <-- on-task" if train_task == eval_task else ""
                 primary_metric = list(eval_results.values())[0]
-                print(f"  -> {eval_task}: {primary_metric:.4f}{marker}")
+                print(f"  -> {eval_task}: {primary_metric:.4f}{marker}", flush=True)
                 
             except Exception as e:
                 print(f"  -> {eval_task}: ERROR ({e})")
@@ -353,7 +362,12 @@ def main():
     parser.add_argument("--verify-only", action="store_true", help="Only verify individual adapters")
     parser.add_argument("--blend-only", action="store_true", help="Only test naive blending")
     parser.add_argument("--cross-eval", action="store_true", help="Only run cross-task evaluation")
+    parser.add_argument("--max-eval-samples", type=int, default=DEFAULT_MAX_EVAL_SAMPLES,
+                        help="Max test samples per eval (0=full). Default 500 for speed.")
     args = parser.parse_args()
+    
+    max_eval = args.max_eval_samples if args.max_eval_samples > 0 else None
+    print(f"Max eval samples per task: {max_eval if max_eval else 'ALL (full test set)'}")
     
     # Default: run everything
     run_all = not (args.verify_only or args.blend_only or args.cross_eval)
@@ -412,17 +426,33 @@ def main():
     
     # Phase 2a: Verify individual adapters
     if run_all or args.verify_only:
-        verify_results = verify_adapters(base_model, tokenizer, adapters, DATA_DIR)
+        verify_results = verify_adapters(base_model, tokenizer, adapters, DATA_DIR, max_eval_samples=max_eval)
         all_results["verify_individual"] = verify_results
     
     # Phase 2b: Naive weight blending
     if run_all or args.blend_only:
-        blend_results = test_naive_blending(base_model, tokenizer, adapters, DATA_DIR)
+        # Reload base model fresh — verify_adapters may have mutated it
+        del base_model
+        torch.cuda.empty_cache()
+        print(f"\nReloading base model for Phase 2b...")
+        base_model = AutoModelForCausalLM.from_pretrained(
+            MODEL_NAME, trust_remote_code=True, torch_dtype=torch_dtype,
+            device_map="auto", attn_implementation="eager",
+        )
+        blend_results = test_naive_blending(base_model, tokenizer, adapters, DATA_DIR, max_eval_samples=max_eval)
         all_results["naive_blending"] = blend_results
     
     # Phase 2c: Cross-task evaluation matrix
     if run_all or args.cross_eval:
-        matrix = cross_task_eval(base_model, tokenizer, adapters, DATA_DIR)
+        # Reload base model fresh
+        del base_model
+        torch.cuda.empty_cache()
+        print(f"\nReloading base model for Phase 2c...")
+        base_model = AutoModelForCausalLM.from_pretrained(
+            MODEL_NAME, trust_remote_code=True, torch_dtype=torch_dtype,
+            device_map="auto", attn_implementation="eager",
+        )
+        matrix = cross_task_eval(base_model, tokenizer, adapters, DATA_DIR, max_eval_samples=max_eval)
         all_results["cross_task_matrix"] = matrix
     
     # Save results

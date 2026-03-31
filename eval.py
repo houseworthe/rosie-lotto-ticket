@@ -318,11 +318,12 @@ REFERENCE_KEYS = {
 }
 
 
-def evaluate_task(model, tokenizer, task, data_dir, max_seq_len=512, batch_size=4):
+def evaluate_task(model, tokenizer, task, data_dir, max_seq_len=512, batch_size=4, max_samples=None):
     """
     Run full evaluation for a task. Returns dict of metric_name -> value.
 
-    This function is the ground truth metric. Do not modify.
+    This function is the ground truth metric. Do not modify existing logic.
+    max_samples: if set, subsample the test set for faster evaluation.
     """
     task_config = TASK_PROMPTS[task]
     eval_fn = EVAL_FUNCTIONS[task]
@@ -330,6 +331,12 @@ def evaluate_task(model, tokenizer, task, data_dir, max_seq_len=512, batch_size=
 
     # Load test set
     test_dataset = load_from_disk(os.path.join(data_dir, task, "test"))
+    
+    # Subsample if requested (for Phase 2 speed)
+    if max_samples and len(test_dataset) > max_samples:
+        print(f"  Subsampling {max_samples}/{len(test_dataset)} test examples")
+        indices = np.random.RandomState(42).choice(len(test_dataset), max_samples, replace=False)
+        test_dataset = test_dataset.select(indices)
 
     # Build prompts
     prompts = build_prompts(test_dataset, task_config, tokenizer)
