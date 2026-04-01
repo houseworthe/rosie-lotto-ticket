@@ -234,8 +234,7 @@ class AdaptiveLoRARouter(nn.Module):
         
         # Neuron-level gates: one per adapter
         # Each gate outputs a mask over the LoRA rank dimensions
-        # Initialize with positive bias so gates start OPEN (sigmoid(2) ≈ 0.88)
-        # This prevents sparsity penalty from collapsing gates to 0 before learning
+        # Use normal init but bias final layer to start OPEN (sigmoid(2) ≈ 0.88)
         self.neuron_gates = nn.ModuleList()
         for _ in range(n_adapters):
             gate = nn.Sequential(
@@ -244,9 +243,10 @@ class AdaptiveLoRARouter(nn.Module):
                 nn.Linear(lora_rank * 2, lora_rank),
                 nn.Sigmoid(),  # soft mask: 0-1 per neuron
             )
-            # Init final layer bias to +2 so gates start open
+            # Bias final layer to +2 so gates start open, keep default weight init
             nn.init.constant_(gate[2].bias, 2.0)
-            nn.init.zeros_(gate[2].weight)  # start near-uniform, let training differentiate
+            # Small init for weights so gates start near-uniform but can differentiate
+            nn.init.normal_(gate[2].weight, mean=0.0, std=0.01)
             self.neuron_gates.append(gate)
     
     def forward(self, query_embedding):
@@ -674,6 +674,23 @@ def train_router(args):
             loss = task_loss + args.sparsity_lambda * sparsity_loss + args.balance_lambda * balance_loss
             
             loss.backward()
+            
+            # Debug: check gradient flow on first batch of first epoch
+            if epoch == 0 and batch_idx == 0:
+                print(f"  [DEBUG] task_loss={task_loss.item():.4f}, sparsity={sparsity_loss.item():.4f}, balance={balance_loss.item():.4f}", flush=True)
+                print(f"  [DEBUG] topk_scores: {routing_info['topk_scores'][0].detach().cpu().tolist()}", flush=True)
+                print(f"  [DEBUG] topk_indices: {routing_info['topk_indices'][0].detach().cpu().tolist()}", flush=True)
+                print(f"  [DEBUG] all_scores: {routing_info['all_scores'][0].detach().cpu().tolist()}", flush=True)
+                # Check router gradients
+                router_grad_norm = sum(p.grad.norm().item() for p in router.adapter_router.parameters() if p.grad is not None)
+                gate_grad_norm = sum(p.grad.norm().item() for g in router.neuron_gates for p in g.parameters() if p.grad is not None)
+                print(f"  [DEBUG] router_grad_norm={router_grad_norm:.6f}, gate_grad_norm={gate_grad_norm:.6f}", flush=True)
+                # Check gate output values
+                for i, task_name in enumerate(tasks[:3]):
+                    gate_out = routing_info.get('all_scores', None)
+                    gate_params = list(router.neuron_gates[i].parameters())
+                    print(f"  [DEBUG] gate[{task_name}] weight_norm={gate_params[-2].norm().item():.4f}, bias_mean={gate_params[-1].mean().item():.4f}", flush=True)
+            
             torch.nn.utils.clip_grad_norm_(router.parameters(), max_norm=1.0)
             optimizer.step()
             scheduler.step()
