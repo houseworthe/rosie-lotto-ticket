@@ -44,6 +44,7 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel, PeftConfig, get_peft_model
+from datasets import load_from_disk
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -73,6 +74,45 @@ class MixedTaskDataset(Dataset):
     """Interleaved dataset from all tasks. Each item includes the task label
     so the router can learn task-specific routing."""
     
+    # Task-specific prompt configs (must match finetune.py)
+    TASK_CONFIGS = {
+        "trec": {
+            "system": "You are a question classifier. Classify the given question into one of these categories: ABBREVIATION, ENTITY, DESCRIPTION, HUMAN, LOCATION, NUMERIC.",
+            "input_template": "Classify this question: {text}",
+            "output_key": "label_text",
+        },
+        "trec50": {
+            "system": "You are a fine-grained question classifier. Classify the question into one of 50 categories.",
+            "input_template": "Classify this question (fine-grained): {text}",
+            "output_key": "label_text",
+        },
+        "text2sql": {
+            "system": "You are a SQL expert. Given a natural language question and database schema, generate the correct SQL query.",
+            "input_template": "Schema:\n{schema}\n\nQuestion: {question}\n\nSQL:",
+            "output_key": "sql",
+        },
+        "sst2": {
+            "system": "You are a sentiment analyzer. Classify the given sentence as either positive or negative sentiment.",
+            "input_template": "Analyze the sentiment of this sentence: {sentence}",
+            "output_key": "label_text",
+        },
+        "agnews": {
+            "system": "You are a news categorizer. Classify the given news article into one of these categories: World, Sports, Business, Technology.",
+            "input_template": "Categorize this news article: {text}",
+            "output_key": "label_text",
+        },
+        "mnli": {
+            "system": "You are a natural language inference expert. Given a premise and hypothesis, determine if the hypothesis entails, contradicts, or is neutral to the premise.",
+            "input_template": "Determine the relationship: {text}",
+            "output_key": "label_text",
+        },
+        "dbpedia": {
+            "system": "You are an ontology classifier. Classify the given text into the correct category.",
+            "input_template": "Classify this entity: {text}",
+            "output_key": "label_text",
+        },
+    }
+
     def __init__(self, tokenizer, tasks, max_samples_per_task, split="train", max_seq_len=256):
         self.tokenizer = tokenizer
         self.max_seq_len = max_seq_len
@@ -80,34 +120,47 @@ class MixedTaskDataset(Dataset):
         self.task_names = tasks
         
         for task_idx, task in enumerate(tasks):
-            data_path = os.path.join(DATA_DIR, task, f"{split}.jsonl")
-            if not os.path.exists(data_path):
-                # Try loading via prepare.py format
-                data_path = os.path.join(DATA_DIR, task, f"{split}.json")
-            if not os.path.exists(data_path):
+            # Load data from Arrow format (saved by prepare.py via save_to_disk)
+            data_dir = os.path.join(DATA_DIR, task, split)
+            if not os.path.exists(data_dir):
                 print(f"  ⚠️  No {split} data for {task}, skipping", flush=True)
                 continue
             
-            samples = []
-            with open(data_path) as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        samples.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        continue
+            try:
+                dataset = load_from_disk(data_dir)
+            except Exception as e:
+                print(f"  ⚠️  Failed to load {split} data for {task}: {e}", flush=True)
+                continue
             
-            if max_samples_per_task and len(samples) > max_samples_per_task:
-                random.shuffle(samples)
-                samples = samples[:max_samples_per_task]
+            if max_samples_per_task and len(dataset) > max_samples_per_task:
+                dataset = dataset.shuffle(seed=42).select(range(max_samples_per_task))
             
-            for sample in samples:
-                prompt = sample.get("prompt", sample.get("input", ""))
-                completion = sample.get("completion", sample.get("output", sample.get("target", "")))
+            task_config = self.TASK_CONFIGS.get(task, {})
+            input_template = task_config.get("input_template", "{text}")
+            system_msg = task_config.get("system", "")
+            output_key = task_config.get("output_key", "label_text")
+            
+            print(f"  ✅ {task}: {len(dataset)} samples", flush=True)
+            
+            for sample in dataset:
+                # Format prompt using task config
+                try:
+                    input_text = input_template.format(**sample)
+                except KeyError:
+                    input_text = str(sample.get("text", ""))
                 
-                # Format as prompt-completion for causal LM
+                completion = str(sample.get(output_key, ""))
+                
+                # Build prompt with chat template
+                messages = [
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": input_text},
+                ]
+                if hasattr(tokenizer, "apply_chat_template"):
+                    prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                else:
+                    prompt = f"{system_msg}\n{input_text}\n"
+                
                 text = f"{prompt}{completion}"
                 
                 encoded = tokenizer(
