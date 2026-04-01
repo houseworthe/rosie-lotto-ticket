@@ -468,26 +468,35 @@ def train_router(args):
     print(f"Device: {device}", flush=True)
     
     # Detect available adapters
+    # Checkpoints are stored as flat dirs: checkpoints/{task}_Qwen3-0.6B_r16_lr{lr}/
+    # Each dir contains adapter_config.json directly (no nesting).
     print(f"\n🔍 Scanning for adapters in {CHECKPOINT_DIR}...", flush=True)
     adapter_paths = {}
-    for task in SUPPORTED_TASKS:
-        # Look for 0.6B adapters (match Phase 1/2 pattern)
-        task_dir = os.path.join(CHECKPOINT_DIR, task)
-        if not os.path.exists(task_dir):
-            continue
-        # Find the best checkpoint for this task
-        for entry in sorted(os.listdir(task_dir), reverse=True):
-            ckpt_path = os.path.join(task_dir, entry)
-            if os.path.isdir(ckpt_path) and os.path.exists(os.path.join(ckpt_path, "adapter_config.json")):
-                # Verify it's a 0.6B adapter
-                try:
-                    config = json.loads(open(os.path.join(ckpt_path, "adapter_config.json")).read())
-                    base = config.get("base_model_name_or_path", "")
-                    if "0.6B" in base or "0.5B" in base or MODEL_NAME in base:
-                        adapter_paths[task] = ckpt_path
-                        break
-                except:
-                    continue
+    if os.path.isdir(CHECKPOINT_DIR):
+        for entry in sorted(os.listdir(CHECKPOINT_DIR)):
+            ckpt_path = os.path.join(CHECKPOINT_DIR, entry)
+            config_file = os.path.join(ckpt_path, "adapter_config.json")
+            if not os.path.isdir(ckpt_path) or not os.path.exists(config_file):
+                continue
+            # Match task name from directory prefix (longest match first to
+            # avoid "trec" matching "trec50_..." before "trec50" gets a chance)
+            matched_task = None
+            for task in sorted(SUPPORTED_TASKS, key=len, reverse=True):
+                if entry.startswith(task + "_"):
+                    matched_task = task
+                    break
+            if matched_task is None:
+                continue
+            # Verify it's a 0.6B adapter
+            try:
+                config = json.loads(open(config_file).read())
+                base = config.get("base_model_name_or_path", "")
+                if "0.6B" in base or "0.5B" in base or MODEL_NAME in base:
+                    # Keep the first match per task (sorted order picks canonical config)
+                    if matched_task not in adapter_paths:
+                        adapter_paths[matched_task] = ckpt_path
+            except:
+                continue
     
     if len(adapter_paths) < 2:
         print(f"❌ Need at least 2 adapters, found {len(adapter_paths)}", flush=True)
