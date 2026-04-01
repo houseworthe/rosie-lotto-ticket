@@ -63,7 +63,7 @@ DEFAULT_MAX_EVAL_SAMPLES = 500   # per task
 DEFAULT_EPOCHS = 5
 DEFAULT_TOP_K = 2
 DEFAULT_LR = 1e-3
-DEFAULT_SPARSITY_LAMBDA = 0.01
+DEFAULT_SPARSITY_LAMBDA = 0.001  # reduced from 0.01 — was collapsing gates to 0
 DEFAULT_BALANCE_LAMBDA = 0.01
 
 # ---------------------------------------------------------------------------
@@ -234,14 +234,20 @@ class AdaptiveLoRARouter(nn.Module):
         
         # Neuron-level gates: one per adapter
         # Each gate outputs a mask over the LoRA rank dimensions
-        self.neuron_gates = nn.ModuleList([
-            nn.Sequential(
+        # Initialize with positive bias so gates start OPEN (sigmoid(2) ≈ 0.88)
+        # This prevents sparsity penalty from collapsing gates to 0 before learning
+        self.neuron_gates = nn.ModuleList()
+        for _ in range(n_adapters):
+            gate = nn.Sequential(
                 nn.Linear(d_model, lora_rank * 2),
                 nn.ReLU(),
                 nn.Linear(lora_rank * 2, lora_rank),
                 nn.Sigmoid(),  # soft mask: 0-1 per neuron
-            ) for _ in range(n_adapters)
-        ])
+            )
+            # Init final layer bias to +2 so gates start open
+            nn.init.constant_(gate[2].bias, 2.0)
+            nn.init.zeros_(gate[2].weight)  # start near-uniform, let training differentiate
+            self.neuron_gates.append(gate)
     
     def forward(self, query_embedding):
         """
@@ -801,6 +807,7 @@ def evaluate_router(composed, tasks, tokenizer, device, args):
                 model=composed.base_model,  # TODO: need composed forward for eval
                 tokenizer=tokenizer,
                 task=task,
+                data_dir=DATA_DIR,
                 max_samples=args.max_eval_samples,
             )
             results[task] = acc
