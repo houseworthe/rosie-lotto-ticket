@@ -63,8 +63,9 @@ DEFAULT_MAX_EVAL_SAMPLES = 500   # per task
 DEFAULT_EPOCHS = 5
 DEFAULT_TOP_K = 2
 DEFAULT_LR = 1e-3
-DEFAULT_SPARSITY_LAMBDA = 0.001  # reduced from 0.01 — was collapsing gates to 0
+DEFAULT_SPARSITY_LAMBDA = 0.0001  # reduced aggressively — gate grads are 10x smaller than router grads
 DEFAULT_BALANCE_LAMBDA = 0.01
+DEFAULT_GATE_LR_MULT = 10.0  # gate params get 10x higher LR to compensate for weak gradients
 
 # ---------------------------------------------------------------------------
 # Dataset: mixed-task training data
@@ -243,8 +244,9 @@ class AdaptiveLoRARouter(nn.Module):
                 nn.Linear(lora_rank * 2, lora_rank),
                 nn.Sigmoid(),  # soft mask: 0-1 per neuron
             )
-            # Bias final layer to +2 so gates start open, keep default weight init
-            nn.init.constant_(gate[2].bias, 2.0)
+            # Bias final layer to +5 so gates start firmly open (sigmoid(5) ≈ 0.993)
+            # This gives the router time to learn before sparsity can collapse gates
+            nn.init.constant_(gate[2].bias, 5.0)
             # Small init for weights so gates start near-uniform but can differentiate
             nn.init.normal_(gate[2].weight, mean=0.0, std=0.01)
             self.neuron_gates.append(gate)
@@ -630,9 +632,18 @@ def train_router(args):
         drop_last=True,
     )
     
-    # Optimizer — only router parameters
-    optimizer = torch.optim.AdamW(router.parameters(), lr=args.lr, weight_decay=0.01)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs * len(train_loader))
+    # Optimizer — separate param groups: higher LR for gates (weak gradients)
+    router_params = list(router.adapter_router.parameters())
+    gate_params = list(router.neuron_gates.parameters())
+    gate_lr = args.lr * DEFAULT_GATE_LR_MULT
+    print(f"  Router params: {sum(p.numel() for p in router_params):,} (lr={args.lr})", flush=True)
+    print(f"  Gate params: {sum(p.numel() for p in gate_params):,} (lr={gate_lr})", flush=True)
+    optimizer = torch.optim.AdamW([
+        {"params": router_params, "lr": args.lr},
+        {"params": gate_params, "lr": gate_lr},
+    ], weight_decay=0.01)
+    total_steps = args.epochs * len(train_loader)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_steps)
     
     # Training
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -675,21 +686,12 @@ def train_router(args):
             
             loss.backward()
             
-            # Debug: check gradient flow on first batch of first epoch
-            if epoch == 0 and batch_idx == 0:
-                print(f"  [DEBUG] task_loss={task_loss.item():.4f}, sparsity={sparsity_loss.item():.4f}, balance={balance_loss.item():.4f}", flush=True)
-                print(f"  [DEBUG] topk_scores: {routing_info['topk_scores'][0].detach().cpu().tolist()}", flush=True)
-                print(f"  [DEBUG] topk_indices: {routing_info['topk_indices'][0].detach().cpu().tolist()}", flush=True)
-                print(f"  [DEBUG] all_scores: {routing_info['all_scores'][0].detach().cpu().tolist()}", flush=True)
-                # Check router gradients
+            # Log gradient stats on first batch of each epoch
+            if batch_idx == 0:
                 router_grad_norm = sum(p.grad.norm().item() for p in router.adapter_router.parameters() if p.grad is not None)
                 gate_grad_norm = sum(p.grad.norm().item() for g in router.neuron_gates for p in g.parameters() if p.grad is not None)
-                print(f"  [DEBUG] router_grad_norm={router_grad_norm:.6f}, gate_grad_norm={gate_grad_norm:.6f}", flush=True)
-                # Check gate output values
-                for i, task_name in enumerate(tasks[:3]):
-                    gate_out = routing_info.get('all_scores', None)
-                    gate_params = list(router.neuron_gates[i].parameters())
-                    print(f"  [DEBUG] gate[{task_name}] weight_norm={gate_params[-2].norm().item():.4f}, bias_mean={gate_params[-1].mean().item():.4f}", flush=True)
+                print(f"  [grad] router={router_grad_norm:.6f}, gates={gate_grad_norm:.6f}, "
+                      f"sparsity={sparsity_loss.item():.4f}, balance={balance_loss.item():.4f}", flush=True)
             
             torch.nn.utils.clip_grad_norm_(router.parameters(), max_norm=1.0)
             optimizer.step()

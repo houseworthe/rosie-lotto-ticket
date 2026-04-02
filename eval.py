@@ -117,7 +117,12 @@ def build_prompts(dataset, task_config, tokenizer):
     prompts = []
     for example in dataset:
         system_msg = task_config["system"]
-        input_text = task_config["input_template"].format(**example)
+        # Filter example to only string-valued fields to avoid dict.__format__ errors
+        str_example = {k: v for k, v in example.items() if isinstance(v, (str, int, float))}
+        try:
+            input_text = task_config["input_template"].format(**str_example)
+        except (KeyError, TypeError):
+            input_text = str(example.get("text", str(example)))
 
         messages = [
             {"role": "system", "content": system_msg},
